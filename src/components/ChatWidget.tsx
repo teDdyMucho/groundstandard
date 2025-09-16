@@ -40,6 +40,41 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
     return text;
   };
 
+  // Parse various webhook response shapes into plain text and optional article
+  const extractReply = (raw: string): { botText: string; article: string } => {
+    let botText = '';
+    let article = '';
+    try {
+      const parsed: any = JSON.parse(raw);
+      const dig = (node: any) => {
+        if (node == null) return;
+        if (typeof node === 'string') {
+          if (!botText) botText = node;
+          return;
+        }
+        if (Array.isArray(node)) {
+          for (const item of node) dig(item);
+          return;
+        }
+        if (typeof node === 'object') {
+          // Common shapes: {message, article} or {output: {message, article}}
+          const maybe = node.output && typeof node.output === 'object' ? node.output : node;
+          if (!botText && typeof maybe.message === 'string') botText = maybe.message;
+          if (!article && typeof maybe.article === 'string') article = maybe.article;
+          // In case nested deeper
+          for (const key of Object.keys(node)) {
+            if (typeof (node as any)[key] === 'object') dig((node as any)[key]);
+          }
+        }
+      };
+      dig(parsed);
+    } catch {
+      // not JSON; treat as plain text
+      botText = raw;
+    }
+    return { botText: normalizeWebhookReply(botText || raw), article: article ? normalizeWebhookReply(article) : '' };
+  };
+
   // Latest article comes from webhook 'article' field
   const latestArticle = articleText;
 
@@ -92,30 +127,12 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
         body: JSON.stringify({ message: text, session_id: sessionId })
       });
       const raw = await resp.text();
-      let reply = raw;
-      let parsed: any = null;
-      try {
-        parsed = JSON.parse(raw);
-        if (typeof parsed === 'string') {
-          reply = parsed;
-        } else {
-          reply = JSON.stringify(parsed);
-        }
-      } catch { /* keep raw as text */ }
-      if (!resp.ok) throw new Error(`Chat error: ${resp.status} ${reply}`);
-      // Determine what to show in chat and in the article pane
-      let botText = reply;
-      let article = '';
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.message === 'string') botText = parsed.message;
-        if (typeof parsed.article === 'string') article = parsed.article;
-      }
-      const displayed = normalizeWebhookReply(botText);
-      const articleDisplayed = article ? normalizeWebhookReply(article) : '';
+      const { botText, article } = extractReply(raw);
+      if (!resp.ok) throw new Error(`Chat error: ${resp.status} ${botText || raw}`);
       // replace typing indicator with final bot message
       setMessages((m) => m.filter(msg => !(msg.role === 'bot' && msg.text === '...typing' && msg.ts === typingId)));
-      setMessages((m) => [...m, { role: 'bot', text: displayed, ts: Date.now() }]);
-      if (articleDisplayed) setArticleText(articleDisplayed);
+      setMessages((m) => [...m, { role: 'bot', text: botText, ts: Date.now() }]);
+      if (article) setArticleText(article);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to send message';
       setError(msg);
@@ -239,7 +256,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                   className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
                 >
                   <Download className="w-4 h-4" />
-                  Download Word
+                  Download
                 </button>
               </div>
               <div className="flex-1 overflow-auto p-4">
