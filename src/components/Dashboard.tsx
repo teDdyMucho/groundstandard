@@ -1,5 +1,6 @@
-import { useState, useMemo, type FormEvent } from 'react';
+import { useState, useMemo, useEffect, type FormEvent } from 'react';
 import { Search, BarChart3, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send } from 'lucide-react';
+import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
 
 export default function Dashboard() {
@@ -20,7 +21,24 @@ export default function Dashboard() {
   const [writeSending, setWriteSending] = useState(false);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [writeSuccess, setWriteSuccess] = useState(false);
+  // Modal state to view article content
+  const [showContentModal, setShowContentModal] = useState(false);
+  const [contentToShow, setContentToShow] = useState<string>('');
+  const [contentTitle, setContentTitle] = useState<string>('');
+  // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending || writeSending;
+  // Optimistic placeholder rows inserted immediately after sending a keyword
+  type OptimisticArticle = {
+    id: string; // temp id
+    title: string;
+    keyword: string;
+    doc_link: string | null;
+    content?: string | null;
+    status: string;
+    _temp: true;
+    createdTs: number;
+  };
+  const [optimisticRows, setOptimisticRows] = useState<OptimisticArticle[]>([]);
 
   const handleSendKeyword = async (e: FormEvent) => {
     e.preventDefault();
@@ -32,13 +50,30 @@ export default function Dashboard() {
     setSending(true);
     setSendError(null);
     setSendSuccess(false);
+    // Insert 5 optimistic placeholder rows immediately
+    const kw = keywordInput.trim();
+    const makeId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const now = Date.now();
+    const newTemps: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
+      id: makeId(),
+      title: 'Processing…',
+      keyword: kw,
+      doc_link: null,
+      content: null,
+      status: 'processing',
+      _temp: true,
+      createdTs: now + idx // preserve order of creation
+    }));
+    setOptimisticRows(prev => [...newTemps, ...prev]);
+    // Close modal right away; we will refetch in background
+    setShowAddModal(false);
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Research', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ keyword: keywordInput.trim() })
+        body: JSON.stringify({ keyword: kw })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -57,6 +92,8 @@ export default function Dashboard() {
     }
   };
 
+  // Chat reset now lives inside ChatWidget
+
   const handleSendWriteKeyword = async (e: FormEvent) => {
     e.preventDefault();
     if (!writeKeywordInput.trim()) {
@@ -67,11 +104,28 @@ export default function Dashboard() {
     setWriteSending(true);
     setWriteError(null);
     setWriteSuccess(false);
+    // Insert 5 optimistic placeholder rows immediately for write flow
+    const kw = writeKeywordInput.trim();
+    const makeId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const nowW = Date.now();
+    const newTempsW: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
+      id: makeId(),
+      title: 'Processing…',
+      keyword: kw,
+      doc_link: null,
+      content: null,
+      status: 'processing',
+      _temp: true,
+      createdTs: nowW + idx
+    }));
+    setOptimisticRows(prev => [...newTempsW, ...prev]);
+    // Close modal immediately; background request will update later
+    setShowWriteModal(false);
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: writeKeywordInput.trim() })
+        body: JSON.stringify({ keyword: kw })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -89,17 +143,62 @@ export default function Dashboard() {
 
   const filteredArticles = useMemo(() => {
     if (!articles) return [];
-    return articles.filter(article => {
+    // Start with real articles
+    const real = articles.filter(article => {
       const matchesSearch = article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           article.keyword.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'all' || article.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [articles, searchTerm, statusFilter]);
+    // Add optimistic rows that match the filters
+    const optimistic = optimisticRows.filter(row => {
+      const matchesSearch = row.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           row.keyword.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'all' || row.status === statusFilter;
+      return matchesSearch && matchesStatus;
+    });
+    // Merge and sort: optimistic first (newest first), then real by id desc
+    const combined: any[] = [...optimistic, ...real];
+    combined.sort((a: any, b: any) => {
+      const aTemp = !!a._temp;
+      const bTemp = !!b._temp;
+      if (aTemp && bTemp) return (b.createdTs || 0) - (a.createdTs || 0);
+      if (aTemp) return -1;
+      if (bTemp) return 1;
+      const aId = typeof a.id === 'number' ? a.id : parseInt(String(a.id), 10) || 0;
+      const bId = typeof b.id === 'number' ? b.id : parseInt(String(b.id), 10) || 0;
+      return bId - aId; // newest first
+    });
+    return combined;
+  }, [articles, searchTerm, statusFilter, optimisticRows]);
 
   const totalPages = Math.ceil(filteredArticles.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedArticles = filteredArticles.slice(startIndex, startIndex + itemsPerPage);
+
+  // Prune optimistic placeholders as real rows arrive for a given keyword
+  // If we detect N real rows for a keyword, remove up to N placeholders for that keyword.
+  useEffect(() => {
+    if (!articles || optimisticRows.length === 0) return;
+    const kwGroups: Record<string, number> = {};
+    for (const a of articles) {
+      kwGroups[a.keyword] = (kwGroups[a.keyword] || 0) + 1;
+    }
+    setOptimisticRows(prev => {
+      const remaining: OptimisticArticle[] = [];
+      const toRemoveCount: Record<string, number> = {};
+      for (const row of prev) {
+        const allow = kwGroups[row.keyword] || 0;
+        const removedSoFar = toRemoveCount[row.keyword] || 0;
+        if (removedSoFar < allow) {
+          toRemoveCount[row.keyword] = removedSoFar + 1;
+          continue; // drop this placeholder
+        }
+        remaining.push(row);
+      }
+      return remaining;
+    });
+  }, [articles, optimisticRows.length]);
 
   const stats = useMemo(() => {
     if (!articles) return { total: 0, newCount: 0, withLinks: 0, withoutLinks: 0 };
@@ -117,7 +216,8 @@ export default function Dashboard() {
       new: { color: 'bg-blue-100 text-blue-800', label: 'New' },
       writing: { color: 'bg-yellow-100 text-yellow-800', label: 'Writing' },
       Used: { color: 'bg-green-100 text-green-800', label: 'Used' },
-      error: { color: 'bg-red-100 text-red-800', label: 'Error' }
+      error: { color: 'bg-red-100 text-red-800', label: 'Error' },
+      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processing…' }
     };
 
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.new;
@@ -148,6 +248,24 @@ export default function Dashboard() {
     return <span className="text-gray-600 break-all">{trimmed}</span>;
   };
 
+  const renderContentLink = (title: string, content?: string | null) => {
+    const trimmed = (content ?? '').trim();
+    if (!trimmed) {
+      return <span className="text-gray-400 text-sm">—</span>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => { setContentTitle(title); setContentToShow(trimmed); setShowContentModal(true); }}
+        className="text-indigo-600 hover:underline text-sm font-medium"
+      >
+        View content
+      </button>
+    );
+  };
+
+  // Chat logic lives in ChatWidget now
+
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -171,7 +289,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10">
           <div className="flex justify-between items-center py-6">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Article Dashboard</h1>
@@ -186,6 +304,7 @@ export default function Dashboard() {
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
+              {/* Chat reset button removed; handled inside ChatWidget */}
               <button onClick={() => !isBusy && setShowAddModal(true)} disabled={isBusy} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50">
                 <FileText className="w-4 h-4 mr-2" />
                 Add Article
@@ -319,7 +438,34 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* View Content Modal */}
+      {showContentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setShowContentModal(false)}
+          />
+          <div className="relative bg-white w-full max-w-2xl mx-auto rounded-lg shadow-lg border p-6 z-10 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">{contentTitle || 'Article Content'}</h3>
+              <button
+                onClick={() => setShowContentModal(false)}
+                className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-auto pr-1">
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">
+                {contentToShow}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className="bg-white rounded-lg shadow-sm p-6 border">
@@ -435,37 +581,51 @@ export default function Dashboard() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">
                     Title
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
                     Keyword
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">
                     Doc Link
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+                    Content
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                     Status
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {paginatedArticles.map((article) => (
-                  <tr key={article.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900 font-medium line-clamp-2 max-w-md">
+                {paginatedArticles.map((article: any) => (
+                  <tr key={`${article.id}`} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 align-top">
+                      <div className="text-sm text-gray-900 font-medium break-words">
                         {article.title}
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 align-top">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                         {article.keyword}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {renderDocLink(article.doc_link)}
+                    <td className="px-6 py-4 align-top">
+                      {article._temp ? (
+                        <span className="text-gray-400 text-sm font-medium">Processing…</span>
+                      ) : (
+                        renderDocLink(article.doc_link)
+                      )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-6 py-4 align-top">
+                      {article._temp ? (
+                        <span className="text-gray-400 text-sm font-medium">Processing…</span>
+                      ) : (
+                        renderContentLink(article.title, article.content)
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap align-top">
                       {getStatusBadge(article.status)}
                     </td>
                   </tr>
@@ -537,6 +697,8 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        {/* Floating Chat Widget (bottom-left) */}
+        <ChatWidget webhookUrl="https://groundstandard.app.n8n.cloud/webhook/chat-bot" />
       </div>
     </div>
   );

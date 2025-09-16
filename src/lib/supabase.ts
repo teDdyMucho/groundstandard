@@ -12,5 +12,8 @@ export interface ResearchArticle {
   title: string;
   keyword: string;
   doc_link: string | null;
+  // Optional content field coming from the Research table.
+  // It may be null or an empty string when content hasn't been generated yet.
+  content?: string | null;
   status: string;
 }
