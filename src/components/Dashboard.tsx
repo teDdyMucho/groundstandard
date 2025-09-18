@@ -15,18 +15,14 @@ export default function Dashboard() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
-  // Modal state for Write Article webhook
-  const [showWriteModal, setShowWriteModal] = useState(false);
-  const [writeKeywordInput, setWriteKeywordInput] = useState('');
-  const [writeSending, setWriteSending] = useState(false);
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const [writeSuccess, setWriteSuccess] = useState(false);
   // Modal state to view article content
   const [showContentModal, setShowContentModal] = useState(false);
   const [contentToShow, setContentToShow] = useState<string>('');
   const [contentTitle, setContentTitle] = useState<string>('');
   // Chat widget moved to its own component (ChatWidget)
-  const isBusy = sending || writeSending;
+  const isBusy = sending;
+  // Track which rows are in the process of sending a Write request
+  const [writingIds, setWritingIds] = useState<Set<string>>(new Set());
   // Optimistic placeholder rows inserted immediately after sending a keyword
   type OptimisticArticle = {
     id: string; // temp id
@@ -93,51 +89,37 @@ export default function Dashboard() {
   };
 
   // Chat reset now lives inside ChatWidget
-
-  const handleSendWriteKeyword = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!writeKeywordInput.trim()) {
-      setWriteError('Please enter a keyword');
-      setWriteSuccess(false);
-      return;
-    }
-    setWriteSending(true);
-    setWriteError(null);
-    setWriteSuccess(false);
-    // Insert 5 optimistic placeholder rows immediately for write flow
-    const kw = writeKeywordInput.trim();
-    const makeId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-    const nowW = Date.now();
-    const newTempsW: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
-      id: makeId(),
-      title: 'Processing…',
-      keyword: kw,
-      doc_link: null,
-      content: null,
-      status: 'processing',
-      _temp: true,
-      createdTs: nowW + idx
-    }));
-    setOptimisticRows(prev => [...newTempsW, ...prev]);
-    // Close modal immediately; background request will update later
-    setShowWriteModal(false);
+  
+  // Send the selected article title to the Write webhook when clicking Write in the Status column
+  const handleWriteForArticle = async (article: any) => {
+    const key = String(article.id ?? article.title);
+    setWritingIds(prev => new Set(prev).add(key));
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: kw })
+        body: JSON.stringify({ title: article.title })
       });
       if (!resp.ok) {
         const txt = await resp.text();
         throw new Error(`Webhook error: ${resp.status} ${txt}`);
       }
-      setWriteSuccess(true);
-      setWriteKeywordInput('');
-      setTimeout(() => { refetch(); }, 1200);
+      // After a successful request, refresh data to reflect any status changes
+      setTimeout(() => { refetch(); }, 800);
     } catch (err) {
-      setWriteError(err instanceof Error ? err.message : 'Failed to send keyword');
+      console.error(err);
+      // Optional: surface a simple alert; can be replaced with toast in future
+      if (err instanceof Error) {
+        window.alert(`Failed to send write request: ${err.message}`);
+      } else {
+        window.alert('Failed to send write request');
+      }
     } finally {
-      setWriteSending(false);
+      setWritingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
     }
   };
 
@@ -309,10 +291,6 @@ export default function Dashboard() {
                 <FileText className="w-4 h-4 mr-2" />
                 Add Article
               </button>
-              <button onClick={() => !isBusy && setShowWriteModal(true)} disabled={isBusy} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 transition-colors disabled:opacity-50">
-                <FileText className="w-4 h-4 mr-2" />
-                Write Article
-              </button>
             </div>
           </div>
         </div>
@@ -371,66 +349,6 @@ export default function Dashboard() {
                 >
                   <Send className={`w-4 h-4 mr-2 ${sending ? 'animate-pulse' : ''}`} />
                   {sending ? 'Sending...' : 'Send'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Write Article Modal */}
-      {showWriteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { if (!writeSending) setShowWriteModal(false); }} />
-          <div className="relative bg-white w-full max-w-md mx-auto rounded-lg shadow-lg border p-6 z-10">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Write Article</h3>
-              <button
-                onClick={() => { if (!writeSending) setShowWriteModal(false); }}
-                disabled={writeSending}
-                className="p-2 rounded hover:bg-gray-100 text-gray-600 disabled:opacity-50"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSendWriteKeyword} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
-                <input
-                  type="text"
-                  value={writeKeywordInput}
-                  onChange={(e) => setWriteKeywordInput(e.target.value)}
-                  placeholder="Enter a keyword"
-                  disabled={writeSending}
-                  className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:opacity-50"
-                />
-              </div>
-
-              {writeError && (
-                <div className="text-sm text-red-600">{writeError}</div>
-              )}
-              {writeSuccess && (
-                <div className="text-sm text-green-600">Keyword sent successfully.</div>
-              )}
-
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => { if (!writeSending) setShowWriteModal(false); }}
-                  disabled={writeSending}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={writeSending}
-                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  <Send className={`w-4 h-4 mr-2 ${writeSending ? 'animate-pulse' : ''}`} />
-                  {writeSending ? 'Sending...' : 'Send'}
                 </button>
               </div>
             </form>
@@ -626,7 +544,27 @@ export default function Dashboard() {
                       )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap align-top">
-                      {getStatusBadge(article.status)}
+                      {article._temp ? (
+                        getStatusBadge(article.status)
+                      ) : (
+                        article.status === 'new' ? (
+                          (() => {
+                            const isWriting = writingIds.has(String(article.id ?? article.title));
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => handleWriteForArticle(article)}
+                                disabled={isWriting}
+                                className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
+                              >
+                                {isWriting ? 'Sending…' : 'Write'}
+                              </button>
+                            );
+                          })()
+                        ) : (
+                          getStatusBadge(article.status)
+                        )
+                      )}
                     </td>
                   </tr>
                 ))}
