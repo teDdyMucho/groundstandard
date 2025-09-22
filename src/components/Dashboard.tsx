@@ -23,6 +23,10 @@ export default function Dashboard() {
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
   const [writingIds, setWritingIds] = useState<Set<string>>(new Set());
+  // Modal state for selecting word limit for Write
+  const [showWriteModal, setShowWriteModal] = useState(false);
+  const [articleToWrite, setArticleToWrite] = useState<any | null>(null);
+  const [wordLimit, setWordLimit] = useState<number>(1000);
   // Optimistic placeholder rows inserted immediately after sending a keyword
   type OptimisticArticle = {
     id: string; // temp id
@@ -90,15 +94,26 @@ export default function Dashboard() {
 
   // Chat reset now lives inside ChatWidget
   
-  // Send the selected article title to the Write webhook when clicking Write in the Status column
-  const handleWriteForArticle = async (article: any) => {
+  // Open modal to choose word limit for Write
+  const handleWriteForArticle = (article: any) => {
+    setArticleToWrite(article);
+    setWordLimit(1000);
+    setShowWriteModal(true);
+  };
+
+  // Confirm and send the selected article id + title + word limit to the Write webhook
+  const handleConfirmWrite = async () => {
+    if (!articleToWrite) return;
+    const article = articleToWrite;
     const key = String(article.id ?? article.title);
+    setShowWriteModal(false);
+    setArticleToWrite(null);
     setWritingIds(prev => new Set(prev).add(key));
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: article.title })
+        body: JSON.stringify({ id: article.id, title: article.title, word_limit: wordLimit })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -108,7 +123,6 @@ export default function Dashboard() {
       setTimeout(() => { refetch(); }, 800);
     } catch (err) {
       console.error(err);
-      // Optional: surface a simple alert; can be replaced with toast in future
       if (err instanceof Error) {
         window.alert(`Failed to send write request: ${err.message}`);
       } else {
@@ -352,6 +366,62 @@ export default function Dashboard() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Write Options Modal */}
+      {showWriteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+          />
+          <div className="relative bg-white w-full max-w-sm mx-auto rounded-lg shadow-lg border p-6 z-10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Write Options</h3>
+              <button
+                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+                className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Word limit</label>
+                <select
+                  value={wordLimit}
+                  onChange={(e) => setWordLimit(parseInt(e.target.value, 10))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value={500}>500 words</option>
+                  <option value={1000}>1000 words</option>
+                  <option value={1500}>1500 words</option>
+                  <option value={2000}>2000 words</option>
+                  <option value={3000}>3000 words</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmWrite}
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700"
+                >
+                  Write
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
