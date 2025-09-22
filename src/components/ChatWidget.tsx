@@ -14,6 +14,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [articleText, setArticleText] = useState('');
+  const [copied, setCopied] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `sess-${Date.now()}`);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -38,6 +39,30 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
     text = decodeHtmlEntities(text);
     text = text.replace(/<[^>]*>/g, '');
     return text;
+  };
+
+  const copyArticle = async () => {
+    try {
+      const text = (latestArticle ?? '').toString();
+      if (!text) return;
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error('Copy failed', e);
+    }
   };
 
   // Parse various webhook response shapes into plain text and optional article
@@ -246,9 +271,18 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
             </div>
 
             {/* Right: Article preview and download */}
-            <div className="w-1/2 flex flex-col border-l">
+            <div className="w-1/2 flex flex-col border-l group">
               <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
                 <h4 className="text-sm font-semibold text-gray-900">AI Article</h4>
+                <button
+                  type="button"
+                  onClick={copyArticle}
+                  disabled={!latestArticle}
+                  className="mr-2 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Copy"
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
                 <button
                   type="button"
                   onClick={downloadAsWord}

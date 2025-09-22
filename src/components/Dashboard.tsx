@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [showContentModal, setShowContentModal] = useState(false);
   const [contentToShow, setContentToShow] = useState<string>('');
   const [contentTitle, setContentTitle] = useState<string>('');
+  const [copied, setCopied] = useState(false);
   // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
@@ -37,6 +38,31 @@ export default function Dashboard() {
     status: string;
     _temp: true;
     createdTs: number;
+  };
+
+  // Copy full content from the View Content Modal
+  const handleCopyContent = async () => {
+    try {
+      const text = (contentToShow ?? '').toString();
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // Fallback for non-secure contexts
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      console.error('Copy failed', e);
+    }
   };
   const [optimisticRows, setOptimisticRows] = useState<OptimisticArticle[]>([]);
 
@@ -436,13 +462,24 @@ export default function Dashboard() {
           <div className="relative bg-white w-full max-w-2xl mx-auto rounded-lg shadow-lg border p-6 z-10 max-h-[80vh] flex flex-col">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">{contentTitle || 'Article Content'}</h3>
-              <button
-                onClick={() => setShowContentModal(false)}
-                className="p-2 rounded hover:bg-gray-100 text-gray-600"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyContent}
+                  className="px-2.5 py-1.5 text-xs font-medium rounded-md bg-gray-800 text-white shadow-sm hover:bg-gray-700"
+                  aria-label="Copy content"
+                  title="Copy"
+                >
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+                <button
+                  onClick={() => setShowContentModal(false)}
+                  className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                  aria-label="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="overflow-auto pr-1">
               <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">
