@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type FormEvent } from 'react';
+﻿import { useState, useMemo, useEffect, type FormEvent } from 'react';
 import { Search, BarChart3, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
@@ -28,6 +28,29 @@ export default function Dashboard() {
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [articleToWrite, setArticleToWrite] = useState<any | null>(null);
   const [wordLimit, setWordLimit] = useState<number>(1000);
+  // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
+  const [extraKeywords, setExtraKeywords] = useState<string[]>([]);
+  const [newKeyword, setNewKeyword] = useState<string>('');
+  const mentionRange = useMemo(() => {
+    const map: Record<number, { min: number; max: number }> = {
+      500: { min: 2, max: 3 },
+      1000: { min: 5, max: 6 },
+      1500: { min: 8, max: 9 },
+      2000: { min: 10, max: 12 },
+      3000: { min: 15, max: 18 },
+    };
+    return map[wordLimit] || { min: 5, max: 6 };
+  }, [wordLimit]);
+  const maxKeywords = useMemo(() => {
+    const map: Record<number, number> = {
+      500: 3,
+      1000: 6,
+      1500: 9,
+      2000: 12,
+      3000: 18,
+    };
+    return map[wordLimit] || 6;
+  }, [wordLimit]);
   // Optimistic placeholder rows inserted immediately after sending a keyword
   type OptimisticArticle = {
     id: string; // temp id
@@ -82,7 +105,7 @@ export default function Dashboard() {
     const now = Date.now();
     const newTemps: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
       id: makeId(),
-      title: 'Processing…',
+      title: 'Processingâ€¦',
       keyword: kw,
       doc_link: null,
       content: null,
@@ -124,7 +147,22 @@ export default function Dashboard() {
   const handleWriteForArticle = (article: any) => {
     setArticleToWrite(article);
     setWordLimit(1000);
+    setExtraKeywords([]);
+    setNewKeyword('');
     setShowWriteModal(true);
+  };
+
+  const handleAddKeyword = () => {
+    const trimmed = newKeyword.trim();
+    if (!trimmed) return;
+    if (extraKeywords.includes(trimmed)) return; // no duplicates
+    if (extraKeywords.length >= maxKeywords) return; // max reached
+    setExtraKeywords([...extraKeywords, trimmed]);
+    setNewKeyword('');
+  };
+
+  const handleRemoveKeyword = (kw: string) => {
+    setExtraKeywords(extraKeywords.filter(k => k !== kw));
   };
 
   // Confirm and send the selected article id + title + word limit to the Write webhook
@@ -139,7 +177,13 @@ export default function Dashboard() {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: article.id, title: article.title, word_limit: wordLimit })
+        body: JSON.stringify({
+          id: article.id,
+          title: article.title,
+          word_limit: wordLimit,
+          additional_keywords: extraKeywords,
+          mentions_per_keyword: { min: mentionRange.min, max: mentionRange.max },
+        })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -239,7 +283,7 @@ export default function Dashboard() {
       writing: { color: 'bg-yellow-100 text-yellow-800', label: 'Writing' },
       Used: { color: 'bg-green-100 text-green-800', label: 'Used' },
       error: { color: 'bg-red-100 text-red-800', label: 'Error' },
-      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processing…' }
+      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processingâ€¦' }
     };
 
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.new;
@@ -273,7 +317,7 @@ export default function Dashboard() {
   const renderContentLink = (title: string, content?: string | null) => {
     const trimmed = (content ?? '').trim();
     if (!trimmed) {
-      return <span className="text-gray-400 text-sm">—</span>;
+      return <span className="text-gray-400 text-sm">â€”</span>;
     }
     return (
       <button
@@ -401,13 +445,13 @@ export default function Dashboard() {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
           />
           <div className="relative bg-white w-full max-w-sm mx-auto rounded-lg shadow-lg border p-6 z-10">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Write Options</h3>
               <button
-                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
                 className="p-2 rounded hover:bg-gray-100 text-gray-600"
                 aria-label="Close"
               >
@@ -429,12 +473,53 @@ export default function Dashboard() {
                   <option value={2000}>2000 words</option>
                   <option value={3000}>3000 words</option>
                 </select>
+                <p className="mt-1 text-xs text-gray-500">Each added keyword will be mentioned {mentionRange.min}{mentionRange.max} times.</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Additional keywords ({extraKeywords.length}/{maxKeywords})</label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddKeyword(); } }}
+                    placeholder="Enter keyword"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddKeyword}
+                    disabled={extraKeywords.length >= maxKeywords || !newKeyword.trim()}
+                    className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                    title="Add keyword"
+                  >
+                    +
+                  </button>
+                </div>
+                {extraKeywords.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {extraKeywords.map((kw) => (
+                      <span key={kw} className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 text-gray-800 rounded-md text-xs">
+                        {kw}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveKeyword(kw)}
+                          className="text-gray-500 hover:text-gray-700"
+                          aria-label="Remove"
+                        >
+                          
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); }}
+                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
@@ -638,14 +723,14 @@ export default function Dashboard() {
                     </td>
                     <td className="px-6 py-4 align-top">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processing…</span>
+                        <span className="text-gray-400 text-sm font-medium">Processingâ€¦</span>
                       ) : (
                         renderDocLink(article.doc_link)
                       )}
                     </td>
                     <td className="px-6 py-4 align-top">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processing…</span>
+                        <span className="text-gray-400 text-sm font-medium">Processingâ€¦</span>
                       ) : (
                         renderContentLink(article.title, article.content)
                       )}
@@ -664,7 +749,7 @@ export default function Dashboard() {
                                 disabled={isWriting}
                                 className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
                               >
-                                {isWriting ? 'Sending…' : 'Write'}
+                                {isWriting ? 'Sendingâ€¦' : 'Write'}
                               </button>
                             );
                           })()
@@ -748,3 +833,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
