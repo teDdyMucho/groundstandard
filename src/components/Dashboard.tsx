@@ -34,22 +34,24 @@ export default function Dashboard() {
   const mentionRange = useMemo(() => {
     const map: Record<number, { min: number; max: number }> = {
       500: { min: 2, max: 3 },
-      1000: { min: 5, max: 6 },
-      1500: { min: 8, max: 9 },
-      2000: { min: 10, max: 12 },
-      3000: { min: 15, max: 18 },
+      1000: { min: 2, max: 3 },
+      1500: { min: 3, max: 4 },
+      2000: { min: 5, max: 6 },
+      2500: { min: 6, max: 7 },
+      3000: { min: 7, max: 9 },
     };
-    return map[wordLimit] || { min: 5, max: 6 };
+    return map[wordLimit] || { min: 2, max: 3 };
   }, [wordLimit]);
   const maxKeywords = useMemo(() => {
     const map: Record<number, number> = {
-      500: 3,
-      1000: 6,
-      1500: 9,
-      2000: 12,
-      3000: 18,
+      500: 0,
+      1000: 3,
+      1500: 4,
+      2000: 6,
+      2500: 7,
+      3000: 9,
     };
-    return map[wordLimit] || 6;
+    return map[wordLimit] || 0;
   }, [wordLimit]);
   // Optimistic placeholder rows inserted immediately after sending a keyword
   type OptimisticArticle = {
@@ -105,7 +107,7 @@ export default function Dashboard() {
     const now = Date.now();
     const newTemps: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
       id: makeId(),
-      title: 'Processingâ€¦',
+      title: 'Processing...€¦',
       keyword: kw,
       doc_link: null,
       content: null,
@@ -283,7 +285,7 @@ export default function Dashboard() {
       writing: { color: 'bg-yellow-100 text-yellow-800', label: 'Writing' },
       Used: { color: 'bg-green-100 text-green-800', label: 'Used' },
       error: { color: 'bg-red-100 text-red-800', label: 'Error' },
-      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processingâ€¦' }
+      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processing...€¦' }
     };
 
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.new;
@@ -317,7 +319,7 @@ export default function Dashboard() {
   const renderContentLink = (title: string, content?: string | null) => {
     const trimmed = (content ?? '').trim();
     if (!trimmed) {
-      return <span className="text-gray-400 text-sm">â€”</span>;
+      return <span className="text-gray-400 text-sm">--</span>;
     }
     return (
       <button
@@ -471,13 +473,13 @@ export default function Dashboard() {
                   <option value={1000}>1000 words</option>
                   <option value={1500}>1500 words</option>
                   <option value={2000}>2000 words</option>
+                  <option value={2500}>2500 words</option>
                   <option value={3000}>3000 words</option>
                 </select>
-                <p className="mt-1 text-xs text-gray-500">Each added keyword will be mentioned {mentionRange.min}{mentionRange.max} times.</p>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Additional keywords ({extraKeywords.length}/{maxKeywords})</label>
+              {maxKeywords > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Additional keywords ({extraKeywords.length}/{maxKeywords})</label>
                 <div className="flex gap-2 mb-2">
                   <input
                     type="text"
@@ -515,6 +517,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
+              )}
 
               <div className="flex justify-end gap-3">
                 <button
@@ -723,14 +726,14 @@ export default function Dashboard() {
                     </td>
                     <td className="px-6 py-4 align-top">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processingâ€¦</span>
+                        <span className="text-gray-400 text-sm font-medium">Processing...€¦</span>
                       ) : (
                         renderDocLink(article.doc_link)
                       )}
                     </td>
                     <td className="px-6 py-4 align-top">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processingâ€¦</span>
+                        <span className="text-gray-400 text-sm font-medium">Processing...€¦</span>
                       ) : (
                         renderContentLink(article.title, article.content)
                       )}
@@ -749,7 +752,7 @@ export default function Dashboard() {
                                 disabled={isWriting}
                                 className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
                               >
-                                {isWriting ? 'Sendingâ€¦' : 'Write'}
+                                {isWriting ? 'Sending...' : 'Write'}
                               </button>
                             );
                           })()
