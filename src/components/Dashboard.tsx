@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useEffect, type FormEvent } from 'react';
+import { useState, useMemo, useEffect, type FormEvent } from 'react';
 import { Search, BarChart3, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
@@ -45,11 +45,11 @@ export default function Dashboard() {
   const maxKeywords = useMemo(() => {
     const map: Record<number, number> = {
       500: 0,
-      1000: 3,
-      1500: 4,
-      2000: 6,
-      2500: 7,
-      3000: 9,
+      1000: 2,
+      1500: 3,
+      2000: 5,
+      2500: 6,
+      3000: 8,
     };
     return map[wordLimit] || 0;
   }, [wordLimit]);
