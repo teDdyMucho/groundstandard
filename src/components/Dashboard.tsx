@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, type FormEvent } from 'react';
 import { Search, BarChart3, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
+import type { ResearchArticle } from '../lib/supabase';
 
 export default function Dashboard() {
   const { articles, loading, error, refetch } = useResearchData();
@@ -15,6 +16,7 @@ export default function Dashboard() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
+  const [keywordCount, setKeywordCount] = useState<string>('1');
   // Modal state to view article content
   const [showContentModal, setShowContentModal] = useState(false);
   const [contentToShow, setContentToShow] = useState<string>('');
@@ -24,9 +26,11 @@ export default function Dashboard() {
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
   const [writingIds, setWritingIds] = useState<Set<string>>(new Set());
+  // Track which rows are sending a Rewrite request
+  const [rewritingIds, setRewritingIds] = useState<Set<string>>(new Set());
   // Modal state for selecting word limit for Write
   const [showWriteModal, setShowWriteModal] = useState(false);
-  const [articleToWrite, setArticleToWrite] = useState<any | null>(null);
+  const [articleToWrite, setArticleToWrite] = useState<ResearchArticle | null>(null);
   const [wordLimit, setWordLimit] = useState<number>(1000);
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
   const [extraKeywords, setExtraKeywords] = useState<string[]>([]);
@@ -89,6 +93,74 @@ export default function Dashboard() {
       console.error('Copy failed', e);
     }
   };
+
+  // Send rewrite request directly to the provided webhook
+  const handleRewriteForArticle = async (article: ResearchArticle) => {
+    if (!article) return;
+    const key = String(article.id ?? article.title);
+    setRewritingIds(prev => new Set(prev).add(key));
+    try {
+      const url = '/api/rewrite';
+      type RewritePayload = {
+        id?: number | string;
+        title?: string;
+        keyword?: string;
+        doc_link?: string | null;
+        content?: string | null;
+        status?: string;
+        word_limit?: number;
+        additional_keywords?: string[];
+        mentions_per_keyword?: { min: number; max: number };
+        action?: string;
+        source?: string;
+      };
+      const payloads: RewritePayload[] = [
+        {
+          id: article.id,
+          title: article.title,
+          keyword: article.keyword,
+          doc_link: article.doc_link ?? null,
+          content: (article as unknown as { content?: string }).content ?? null,
+          status: (article as unknown as { status?: string }).status ?? undefined,
+          word_limit: 1000,
+          additional_keywords: [],
+          mentions_per_keyword: { min: 2, max: 3 },
+          action: 'rewrite',
+          source: 'dashboard-rewrite',
+        },
+        { id: article.id, title: article.title, action: 'rewrite' },
+        { doc_link: article.doc_link ?? null, action: 'rewrite' },
+      ];
+      let ok = false;
+      let lastTxt = '';
+      for (const body of payloads) {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (resp.ok) { ok = true; break; }
+        lastTxt = await resp.text();
+      }
+      if (!ok) {
+        throw new Error(`Rewrite webhook returned non-200. Last response: ${lastTxt || 'No body'}`);
+      }
+      setTimeout(() => { refetch(); }, 800);
+    } catch (err) {
+      console.error(err);
+      if (err instanceof Error) {
+        window.alert(`Failed to send rewrite request: ${err.message}`);
+      } else {
+        window.alert('Failed to send rewrite request');
+      }
+    } finally {
+      setRewritingIds(prev => {
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
   const [optimisticRows, setOptimisticRows] = useState<OptimisticArticle[]>([]);
 
   const handleSendKeyword = async (e: FormEvent) => {
@@ -98,14 +170,18 @@ export default function Dashboard() {
       setSendSuccess(false);
       return;
     }
+    const parsed = parseInt((keywordCount || '1') as string, 10);
+    const count = Math.min(10, Math.max(1, Number.isNaN(parsed) ? 1 : parsed));
     setSending(true);
     setSendError(null);
     setSendSuccess(false);
-    // Insert 5 optimistic placeholder rows immediately
+    // Insert optimistic placeholder rows immediately
     const kw = keywordInput.trim();
-    const makeId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const makeId = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `temp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     const now = Date.now();
-    const newTemps: OptimisticArticle[] = Array.from({ length: 5 }).map((_, idx) => ({
+    const newTemps: OptimisticArticle[] = Array.from({ length: count }).map((_, idx) => ({
       id: makeId(),
       title: 'Processing...€¦',
       keyword: kw,
@@ -124,7 +200,7 @@ export default function Dashboard() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ keyword: kw })
+        body: JSON.stringify({ keyword: kw, count })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -132,6 +208,7 @@ export default function Dashboard() {
       }
       setSendSuccess(true);
       setKeywordInput('');
+      setKeywordCount('1');
       // Optionally refetch after a brief delay in case the webhook inserts into DB
       setTimeout(() => {
         refetch();
@@ -146,7 +223,7 @@ export default function Dashboard() {
   // Chat reset now lives inside ChatWidget
   
   // Open modal to choose word limit for Write
-  const handleWriteForArticle = (article: any) => {
+  const handleWriteForArticle = (article: ResearchArticle) => {
     setArticleToWrite(article);
     setWordLimit(1000);
     setExtraKeywords([]);
@@ -226,11 +303,12 @@ export default function Dashboard() {
       return matchesSearch && matchesStatus;
     });
     // Merge and sort: optimistic first (newest first), then real by id desc
-    const combined: any[] = [...optimistic, ...real];
-    combined.sort((a: any, b: any) => {
+    type ViewArticle = (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle;
+    const combined: ViewArticle[] = [...optimistic, ...real];
+    combined.sort((a: ViewArticle, b: ViewArticle) => {
       const aTemp = !!a._temp;
       const bTemp = !!b._temp;
-      if (aTemp && bTemp) return (b.createdTs || 0) - (a.createdTs || 0);
+      if (aTemp && bTemp) return ((b as OptimisticArticle).createdTs || 0) - ((a as OptimisticArticle).createdTs || 0);
       if (aTemp) return -1;
       if (bTemp) return 1;
       const aId = typeof a.id === 'number' ? a.id : parseInt(String(a.id), 10) || 0;
@@ -410,6 +488,52 @@ export default function Dashboard() {
                   disabled={sending}
                   className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
                 />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">How many keywords (max 10)</label>
+                <div className="flex items-stretch gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const v = parseInt((keywordCount || '1'), 10);
+                      const next = Math.max(1, (Number.isNaN(v) ? 1 : v) - 1);
+                      setKeywordCount(String(next));
+                    }}
+                    disabled={sending}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    aria-label="Decrement"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    step={1}
+                    value={keywordCount}
+                    onChange={(e) => setKeywordCount(e.target.value)}
+                    onBlur={(e) => {
+                      const v = parseInt(e.target.value || '1', 10);
+                      const clamped = Math.min(10, Math.max(1, Number.isNaN(v) ? 1 : v));
+                      setKeywordCount(String(clamped));
+                    }}
+                    disabled={sending}
+                    className="flex-1 border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const v = parseInt((keywordCount || '1'), 10);
+                      const next = Math.min(10, (Number.isNaN(v) ? 1 : v) + 1);
+                      setKeywordCount(String(next));
+                    }}
+                    disabled={sending}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    aria-label="Increment"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
 
               {sendError && (
@@ -663,7 +787,7 @@ export default function Dashboard() {
                   <option value="all">All Statuses</option>
                   <option value="new">New</option>
                   <option value="writing">Writing</option>
-                  <option value="Used">Used</option>
+                  <option value="Used">Rewrite</option>
                 </select>
               </div>
             </div>
@@ -712,7 +836,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {paginatedArticles.map((article: any) => (
+                {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle) => (
                   <tr key={`${article.id}`} className="hover:bg-gray-50 transition-colors">
                     <td className="px-6 py-4 align-top">
                       <div className="text-sm text-gray-900 font-medium break-words">
@@ -753,6 +877,21 @@ export default function Dashboard() {
                                 className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
                               >
                                 {isWriting ? 'Sending...' : 'Write'}
+                              </button>
+                            );
+                          })()
+                        ) : article.status === 'Used' ? (
+                          (() => {
+                            const key = String(article.id ?? article.title);
+                            const isRewriting = rewritingIds.has(key);
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => handleRewriteForArticle(article as ResearchArticle)}
+                                disabled={isRewriting}
+                                className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
+                              >
+                                {isRewriting ? 'Sending...' : 'Rewrite'}
                               </button>
                             );
                           })()
