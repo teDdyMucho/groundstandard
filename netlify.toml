@@ -1,0 +1,15 @@
+[build]
+  publish = "dist"
+
+# Proxy the same path you use locally to the n8n cloud webhook in production
+[[redirects]]
+  from = "/api/rewrite"
+  to = "https://groundstandard.app.n8n.cloud/webhook/rewrite"
+  status = 200
+  force = true
+
+# Optional: If your app is an SPA, uncomment this to handle client-side routes
+# [[redirects]]
+#   from = "/*"
+#   to = "/index.html"
+#   status = 200
