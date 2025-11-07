@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, type FormEvent } from 'react';
-import { MessageCircle, RefreshCw, X, Send, Download } from 'lucide-react';
+import { RefreshCw, X, Send, Download, Bot, User, Sparkles } from 'lucide-react';
 
 interface ChatWidgetProps {
   webhookUrl: string;
@@ -15,7 +15,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [articleText, setArticleText] = useState('');
   const [copied, setCopied] = useState(false);
-  const [sessionId, setSessionId] = useState<string>(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `sess-${Date.now()}`);
+  const [sessionId, setSessionId] = useState<string>(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `sess-${Date.now()}`);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   // HTML -> plain text normalization
@@ -70,8 +70,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
     let botText = '';
     let article = '';
     try {
-      const parsed: any = JSON.parse(raw);
-      const dig = (node: any) => {
+      const parsed: unknown = JSON.parse(raw);
+      const dig = (node: unknown): void => {
         if (node == null) return;
         if (typeof node === 'string') {
           if (!botText) botText = node;
@@ -82,13 +82,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
           return;
         }
         if (typeof node === 'object') {
+          const nodeObj = node as Record<string, unknown>;
           // Common shapes: {message, article} or {output: {message, article}}
-          const maybe = node.output && typeof node.output === 'object' ? node.output : node;
+          const maybe = nodeObj.output && typeof nodeObj.output === 'object' ? nodeObj.output as Record<string, unknown> : nodeObj;
           if (!botText && typeof maybe.message === 'string') botText = maybe.message;
           if (!article && typeof maybe.article === 'string') article = maybe.article;
           // In case nested deeper
-          for (const key of Object.keys(node)) {
-            if (typeof (node as any)[key] === 'object') dig((node as any)[key]);
+          for (const key of Object.keys(nodeObj)) {
+            if (typeof nodeObj[key] === 'object') dig(nodeObj[key]);
           }
         }
       };
@@ -127,7 +128,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
   const reset = () => {
     setMessages([]);
     setError(null);
-    const id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? (crypto as any).randomUUID() : `sess-${Date.now()}`;
+    const id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `sess-${Date.now()}`;
     setSessionId(id);
     setArticleText('');
   };
@@ -179,42 +180,52 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
   }, [messages, open]);
 
   return (
-    <div className="fixed bottom-4 left-4 z-40">
+    <div className="fixed bottom-6 left-6 z-40">
       {!open ? (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex items-center gap-2 px-4 py-3 rounded-full shadow-md bg-indigo-600 text-white hover:bg-indigo-700"
-          aria-label="Open chat"
+          className="group flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 transition-all duration-300 hover:scale-105"
+          aria-label="Open AI Assistant"
         >
-          <MessageCircle className="w-5 h-5" />
-          <span className="text-sm font-medium">Chat</span>
+          <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="text-left">
+            <div className="text-sm font-semibold">AI Assistant</div>
+            <div className="text-xs text-white/80">Ask me anything</div>
+          </div>
         </button>
       ) : (
-        <div className="bg-white border rounded-xl shadow-xl overflow-hidden resize flex flex-col" style={{ width: '48vw', height: '60vh', minWidth: 600, minHeight: 360, maxWidth: '90vw', maxHeight: '85vh', resize: 'both' }}>
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-2 border-b bg-gray-50">
-            <div className="flex items-center gap-2 min-w-0">
-              <MessageCircle className="w-5 h-5 text-indigo-600 shrink-0" />
-              <span className="text-sm font-semibold text-gray-900 shrink-0">Assistant</span>
+        <div className="bg-white/95 backdrop-blur-sm border border-gray-200 rounded-2xl shadow-2xl overflow-hidden resize flex flex-col" style={{ width: '48vw', height: '60vh', minWidth: 600, minHeight: 360, maxWidth: '90vw', maxHeight: '85vh', resize: 'both' }}>
+          {/* Modern Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-black to-gray-800">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <span className="text-lg font-bold text-white">AI Assistant</span>
+                <div className="text-sm text-gray-300">Powered by advanced AI</div>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={reset}
-                className="p-1.5 rounded hover:bg-gray-100 text-gray-600"
+                className="p-2.5 rounded-xl hover:bg-white/10 text-gray-300 hover:text-white transition-all duration-200"
                 title="Reset conversation"
                 aria-label="Reset conversation"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-5 h-5" />
               </button>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="p-1.5 rounded hover:bg-gray-100 text-gray-600"
+                className="p-2.5 rounded-xl hover:bg-white/10 text-gray-300 hover:text-white transition-all duration-200"
                 aria-label="Close chat"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
           </div>
@@ -222,89 +233,134 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
           {/* Body: split left chat / right article preview */}
           <div className="flex flex-1 min-h-0">
             {/* Left: Chat */}
-            <div className="w-1/2 flex flex-col">
-              <div ref={chatScrollRef} className="flex-1 px-4 py-3 space-y-2 overflow-y-auto bg-white">
+            <div className="w-1/2 flex flex-col bg-gradient-to-b from-gray-50 to-white">
+              <div ref={chatScrollRef} className="flex-1 px-6 py-4 space-y-4 overflow-y-auto">
                 {messages.length === 0 && (
-                  <div className="text-xs text-gray-500">Start a conversation below…</div>
+                  <div className="text-center py-8">
+                    <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <Bot className="w-8 h-8 text-gray-600" />
+                    </div>
+                    <div className="text-sm font-medium text-black mb-1">Welcome to AI Assistant</div>
+                    <div className="text-xs text-gray-500">Start a conversation to generate articles</div>
+                  </div>
                 )}
                 {messages.map((m, i) => {
                   const time = new Date(m.ts);
                   const ts = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   const isTyping = m.role === 'bot' && m.text === '...typing';
                   return (
-                    <div key={i} className={`text-sm flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`inline-block px-4 py-2 rounded-2xl shadow-sm max-w-[90%] ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
-                        {isTyping ? (
-                          <div className="flex items-center gap-1">
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                          </div>
-                        ) : (
-                          <pre className="whitespace-pre-wrap break-words">{m.text}</pre>
-                        )}
-                        {!isTyping && (
-                          <div className={`mt-1 text-[10px] ${m.role === 'user' ? 'text-indigo-100' : 'text-gray-500'}`}>{ts}</div>
-                        )}
+                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex items-start gap-3 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                          m.role === 'user' 
+                            ? 'bg-gradient-to-br from-blue-600 to-blue-700' 
+                            : 'bg-gradient-to-br from-red-600 to-red-700'
+                        }`}>
+                          {m.role === 'user' ? (
+                            <User className="w-4 h-4 text-white" />
+                          ) : (
+                            <Bot className="w-4 h-4 text-white" />
+                          )}
+                        </div>
+                        <div className={`px-4 py-3 rounded-2xl shadow-sm ${
+                          m.role === 'user' 
+                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' 
+                            : 'bg-white border border-gray-200 text-black'
+                        }`}>
+                          {isTyping ? (
+                            <div className="flex items-center gap-1">
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                            </div>
+                          ) : (
+                            <pre className="whitespace-pre-wrap break-words text-sm">{m.text}</pre>
+                          )}
+                          {!isTyping && (
+                            <div className={`mt-2 text-xs ${m.role === 'user' ? 'text-blue-100' : 'text-gray-500'}`}>{ts}</div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <form onSubmit={send} className="flex items-center gap-2 px-3 py-2 border-t bg-white">
+              <form onSubmit={send} className="flex items-center gap-3 px-4 py-4 border-t border-gray-200 bg-white/50 backdrop-blur-sm">
                 <input
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Type your message…"
-                  className="flex-1 border rounded-2xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  placeholder="Ask me to write an article..."
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all duration-200 placeholder-gray-500 text-black"
                   disabled={sending}
                 />
                 <button
                   type="submit"
                   disabled={sending || !input.trim()}
-                  className="inline-flex items-center px-3 py-2 rounded-xl text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                  className="inline-flex items-center justify-center w-12 h-12 rounded-xl text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
                 >
-                  <Send className={`w-4 h-4 ${sending ? 'animate-pulse' : ''}`} />
+                  <Send className={`w-5 h-5 ${sending ? 'animate-pulse' : ''}`} />
                 </button>
               </form>
             </div>
 
             {/* Right: Article preview and download */}
-            <div className="w-1/2 flex flex-col border-l group">
-              <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b">
-                <h4 className="text-sm font-semibold text-gray-900">AI Article</h4>
-                <button
-                  type="button"
-                  onClick={copyArticle}
-                  disabled={!latestArticle}
-                  className="mr-2 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white bg-gray-800 hover:bg-gray-700 disabled:opacity-50 opacity-0 group-hover:opacity-100 transition-opacity"
-                  title="Copy"
-                >
-                  {copied ? 'Copied!' : 'Copy'}
-                </button>
-                <button
-                  type="button"
-                  onClick={downloadAsWord}
-                  disabled={!latestArticle}
-                  className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" />
-                  Download
-                </button>
+            <div className="w-1/2 flex flex-col border-l border-gray-200 bg-gradient-to-b from-white to-gray-50">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-700 rounded-lg flex items-center justify-center">
+                    <Download className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-black">Generated Article</h4>
+                    <div className="text-xs text-gray-600">Ready to download</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={copyArticle}
+                    disabled={!latestArticle}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-black bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-all duration-200"
+                    title="Copy to clipboard"
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadAsWord}
+                    disabled={!latestArticle}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </button>
+                </div>
               </div>
-              <div className="flex-1 overflow-auto p-4">
+              <div className="flex-1 overflow-auto p-6">
                 {latestArticle ? (
-                  <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">{latestArticle}</pre>
+                  <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
+                    <pre className="whitespace-pre-wrap break-words text-sm text-black leading-relaxed">{latestArticle}</pre>
+                  </div>
                 ) : (
-                  <div className="text-xs text-gray-500">No article yet. Send a prompt to generate one.</div>
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <Download className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <div className="text-sm font-medium text-black mb-1">No article generated yet</div>
+                    <div className="text-xs text-gray-500">Ask the AI to write an article for you</div>
+                  </div>
                 )}
               </div>
             </div>
           </div>
 
           {error && (
-            <div className="px-4 pb-3 text-xs text-red-600">{error}</div>
+            <div className="px-6 pb-4">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl">
+                <div className="text-xs font-medium text-red-800">{error}</div>
+              </div>
+            </div>
           )}
         </div>
       )}

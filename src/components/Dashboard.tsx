@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, type FormEvent } from 'react';
-import { Search, BarChart3, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send } from 'lucide-react';
+import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
 import type { ResearchArticle } from '../lib/supabase';
@@ -10,9 +10,22 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+
+  // Back-to-top visibility
+  const [showScrollTop, setShowScrollTop] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShowScrollTop(window.scrollY > 300);
+    window.addEventListener('scroll', onScroll);
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
   // Modal state for sending a Keyword to webhook
   const [showAddModal, setShowAddModal] = useState(false);
   const [keywordInput, setKeywordInput] = useState('');
+  const [bizName, setBizName] = useState('');
+  const [city, setCity] = useState('');
+  const [provState, setProvState] = useState('');
+  const [callToAction, setCallToAction] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
@@ -22,6 +35,7 @@ export default function Dashboard() {
   const [contentToShow, setContentToShow] = useState<string>('');
   const [contentTitle, setContentTitle] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
@@ -68,6 +82,38 @@ export default function Dashboard() {
     _temp: true;
     createdTs: number;
   };
+
+  // State for optimistic placeholders and persistence/polling hooks
+  const [optimisticRows, setOptimisticRows] = useState<OptimisticArticle[]>([]);
+  const STORAGE_KEY = 'gs_optimistic_rows_v1';
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as OptimisticArticle[] | null;
+      if (!parsed || !Array.isArray(parsed)) return;
+      const now = Date.now();
+      const maxAgeMs = 2 * 60 * 60 * 1000; // keep at most 2 hours old placeholders
+      const restored = parsed.filter(r => r && r._temp === true && typeof r.createdTs === 'number' && (now - r.createdTs) <= maxAgeMs);
+      if (restored.length > 0) {
+        setOptimisticRows(prev => (prev.length > 0 ? prev : restored));
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(optimisticRows));
+    } catch {
+      // ignore storage errors
+    }
+  }, [optimisticRows]);
+  useEffect(() => {
+    if (optimisticRows.length === 0) return;
+    const id = setInterval(() => { refetch(); }, 5000);
+    return () => clearInterval(id);
+  }, [optimisticRows.length, refetch]);
 
   // Copy full content from the View Content Modal
   const handleCopyContent = async () => {
@@ -161,7 +207,7 @@ export default function Dashboard() {
       });
     }
   };
-  const [optimisticRows, setOptimisticRows] = useState<OptimisticArticle[]>([]);
+  
 
   const handleSendKeyword = async (e: FormEvent) => {
     e.preventDefault();
@@ -192,6 +238,8 @@ export default function Dashboard() {
       createdTs: now + idx // preserve order of creation
     }));
     setOptimisticRows(prev => [...newTemps, ...prev]);
+    setToast(`Started processing ${count} article${count > 1 ? 's' : ''} for "${kw}"`);
+    setTimeout(() => setToast(null), 3500);
     // Close modal right away; we will refetch in background
     setShowAddModal(false);
     try {
@@ -200,7 +248,14 @@ export default function Dashboard() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ keyword: kw, count })
+        body: JSON.stringify({
+          keyword: kw,
+          count,
+          business_name: bizName || undefined,
+          city: city || undefined,
+          state: provState || undefined,
+          call_to_action: callToAction || undefined,
+        })
       });
       if (!resp.ok) {
         const txt = await resp.text();
@@ -209,6 +264,10 @@ export default function Dashboard() {
       setSendSuccess(true);
       setKeywordInput('');
       setKeywordCount('1');
+      setBizName('');
+      setCity('');
+      setProvState('');
+      setCallToAction('');
       // Optionally refetch after a brief delay in case the webhook inserts into DB
       setTimeout(() => {
         refetch();
@@ -359,17 +418,21 @@ export default function Dashboard() {
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
-      new: { color: 'bg-blue-100 text-blue-800', label: 'New' },
-      writing: { color: 'bg-yellow-100 text-yellow-800', label: 'Writing' },
-      Used: { color: 'bg-green-100 text-green-800', label: 'Used' },
-      error: { color: 'bg-red-100 text-red-800', label: 'Error' },
-      processing: { color: 'bg-gray-200 text-gray-700', label: 'Processing...€¦' }
+      new: { color: 'bg-gradient-to-r from-blue-100 to-blue-200 text-blue-800 border-blue-300', label: 'New', icon: null },
+      writing: { color: 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800 border-gray-300', label: 'Writing', icon: Edit3 },
+      Used: { color: 'bg-gradient-to-r from-blue-100 to-blue-200 text-blue-800 border-blue-300', label: 'Completed', icon: CheckCircle },
+      error: { color: 'bg-gradient-to-r from-red-100 to-red-200 text-red-800 border-red-300', label: 'Error', icon: AlertCircle },
+      processing: { color: 'bg-gradient-to-r from-red-100 to-red-200 text-red-800 border-red-300', label: 'Processing', icon: Loader2 }
     };
 
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.new;
+    const IconComponent = config.icon;
 
     return (
-      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color}`}>
+      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${config.color}`}>
+        {IconComponent && (
+          <IconComponent className={`w-3 h-3 ${status === 'processing' ? 'animate-spin' : ''}`} />
+        )}
         {config.label}
       </span>
     );
@@ -377,7 +440,7 @@ export default function Dashboard() {
 
   const renderDocLink = (docLink: string | null) => {
     if (docLink === null) {
-      return <span className="text-gray-400 text-sm font-medium">NULL</span>;
+      return <span className="text-gray-400 text-sm font-medium">Click "Write" to generate document link</span>;
     }
     const trimmed = docLink.trim();
     if (!trimmed || trimmed.toUpperCase() === 'EMPTY') {
@@ -397,7 +460,7 @@ export default function Dashboard() {
   const renderContentLink = (title: string, content?: string | null) => {
     const trimmed = (content ?? '').trim();
     if (!trimmed) {
-      return <span className="text-gray-400 text-sm">--</span>;
+      return <span className="text-gray-400 text-sm">Click "Write" to generate content</span>;
     }
     return (
       <button
@@ -432,66 +495,133 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10">
-          <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Article Dashboard</h1>
-              <p className="mt-1 text-sm text-gray-500">Monitor and manage your article content</p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+      {/* Modern Header */}
+      <div className="bg-black/95 backdrop-blur-sm border-b border-gray-800 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl font-bold text-white">
+                    Article Dashboard
+                  </h1>
+                  <p className="text-sm text-gray-300">Create, monitor and manage your content</p>
+                </div>
+              </div>
             </div>
-            <div className="flex space-x-3">
+            <div className="flex items-center space-x-3">
               <button 
                 onClick={refetch}
                 disabled={loading || isBusy}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="inline-flex items-center px-4 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
-              {/* Chat reset button removed; handled inside ChatWidget */}
-              <button onClick={() => !isBusy && setShowAddModal(true)} disabled={isBusy} className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors disabled:opacity-50">
-                <FileText className="w-4 h-4 mr-2" />
-                Add Article
+              <button 
+                onClick={() => !isBusy && setShowAddModal(true)} 
+                disabled={isBusy} 
+                className="inline-flex items-center px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Create Article
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Add Article Modal */}
+      {/* Modern Add Article Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="absolute inset-0 bg-black/40" onClick={() => { if (!sending) setShowAddModal(false); }} />
-          <div className="relative bg-white w-full max-w-md mx-auto rounded-lg shadow-lg border p-6 z-10">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Send Keyword</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { if (!sending) setShowAddModal(false); }} />
+          <div className="relative bg-white/95 backdrop-blur-sm w-full max-w-lg mx-auto rounded-2xl shadow-2xl border border-gray-200 p-8 z-10 animate-in zoom-in-95 duration-300">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-black">Create New Articles</h3>
+                  <p className="text-sm text-gray-600">Generate articles from your keyword</p>
+                </div>
+              </div>
               <button
                 onClick={() => { if (!sending) setShowAddModal(false); }}
                 disabled={sending}
-                className="p-2 rounded hover:bg-gray-100 text-gray-600 disabled:opacity-50"
+                className="p-2 rounded-xl hover:bg-gray-100 text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-all duration-200"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSendKeyword} className="space-y-4">
+            <form onSubmit={handleSendKeyword} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Keyword</label>
+                <label className="block text-sm font-semibold text-black mb-3">Generate Topic</label>
                 <input
                   type="text"
                   value={keywordInput}
                   onChange={(e) => setKeywordInput(e.target.value)}
-                  placeholder="Enter a keyword"
+                  placeholder="Enter topic or subject to generate articles about..."
                   disabled={sending}
-                  className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-black placeholder-gray-500"
                 />
               </div>
+              {/* Optional business context fields */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-black mb-2">Name of business (optional)</label>
+                  <input
+                    type="text"
+                    value={bizName}
+                    onChange={(e) => setBizName(e.target.value)}
+                    placeholder="Enter business name"
+                    disabled={sending}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-black placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-black mb-2">City (optional)</label>
+                  <input
+                    type="text"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="Enter city"
+                    disabled={sending}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-black placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-black mb-2">State/Province (optional)</label>
+                  <input
+                    type="text"
+                    value={provState}
+                    onChange={(e) => setProvState(e.target.value)}
+                    placeholder="Enter state or province"
+                    disabled={sending}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-black placeholder-gray-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-black mb-2">Call to action (optional)</label>
+                  <input
+                    type="text"
+                    value={callToAction}
+                    onChange={(e) => setCallToAction(e.target.value)}
+                    placeholder="Enter a call to action"
+                    disabled={sending}
+                    className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-black placeholder-gray-500"
+                  />
+                </div>
+              </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">How many keywords (max 10)</label>
-                <div className="flex items-stretch gap-2">
+                <label className="block text-sm font-semibold text-black mb-3">Number of Articles? (max 10)</label>
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -500,7 +630,7 @@ export default function Dashboard() {
                       setKeywordCount(String(next));
                     }}
                     disabled={sending}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    className="w-10 h-10 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-xl text-black font-semibold disabled:opacity-50 transition-all duration-200 flex items-center justify-center"
                     aria-label="Decrement"
                   >
                     -
@@ -518,7 +648,7 @@ export default function Dashboard() {
                       setKeywordCount(String(clamped));
                     }}
                     disabled={sending}
-                    className="flex-1 border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 disabled:opacity-50 transition-all duration-200 text-center font-semibold text-black"
                   />
                   <button
                     type="button"
@@ -528,7 +658,7 @@ export default function Dashboard() {
                       setKeywordCount(String(next));
                     }}
                     disabled={sending}
-                    className="px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                    className="w-10 h-10 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-xl text-black font-semibold disabled:opacity-50 transition-all duration-200 flex items-center justify-center"
                     aria-label="Increment"
                   >
                     +
@@ -537,28 +667,47 @@ export default function Dashboard() {
               </div>
 
               {sendError && (
-                <div className="text-sm text-red-600">{sendError}</div>
+                <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                    <span className="text-sm font-medium text-red-800">{sendError}</span>
+                  </div>
+                </div>
               )}
               {sendSuccess && (
-                <div className="text-sm text-green-600">Keyword sent successfully.</div>
+                <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <span className="text-sm font-medium text-green-800">Articles are being generated successfully!</span>
+                  </div>
+                </div>
               )}
 
-              <div className="flex justify-end gap-3">
+              <div className="flex gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => { if (!sending) setShowAddModal(false); }}
                   disabled={sending}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                  className="flex-1 px-6 py-3 border border-gray-300 rounded-xl text-sm font-semibold text-black bg-white hover:bg-gray-50 disabled:opacity-50 transition-all duration-200"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={sending}
-                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                  className="flex-1 inline-flex items-center justify-center px-6 py-3 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
                 >
-                  <Send className={`w-4 h-4 mr-2 ${sending ? 'animate-pulse' : ''}`} />
-                  {sending ? 'Sending...' : 'Send'}
+                  {sending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4 mr-2" />
+                      Create Articles
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -702,277 +851,444 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-lg shadow-sm p-6 border">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <FileText className="w-8 h-8 text-blue-600" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Total Articles</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">{stats.total}</dd>
-                </dl>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm p-6 border">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <Clock className="w-8 h-8 text-amber-600" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">New Items</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">{stats.newCount}</dd>
-                </dl>
+      <div className="max-w-[81vw] mx-auto px-6 py-8">
+        {/* Professional Analytics Dashboard */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-10">
+          {/* Total Articles Card */}
+          <div className="relative bg-white rounded-3xl p-8 border-2 border-gray-100 shadow-md hover:shadow-lg transition-all duration-500 group overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full -mr-16 -mt-16 opacity-50"></div>
+            <div className="relative z-10">
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wider">Total Articles</p>
+                  </div>
+                  <p className="text-4xl font-black text-black mb-2">{stats.total}</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-1 bg-gradient-to-r from-blue-600 to-blue-400 rounded-full"></div>
+                    <span className="text-xs font-semibold text-gray-400">CONTENT LIBRARY</span>
+                  </div>
+                </div>
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
+                  <FileText className="w-8 h-8 text-white" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm p-6 border">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <CheckCircle className="w-8 h-8 text-green-600" />
-              </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">With Links</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">{stats.withLinks}</dd>
-                </dl>
+          {/* New Items Card */}
+          <div className="relative bg-white rounded-3xl p-8 border-2 border-gray-100 shadow-md hover:shadow-lg transition-all duration-500 group overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-50 to-red-100 rounded-full -mr-16 -mt-16 opacity-50"></div>
+            <div className="relative z-10">
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-3 h-3 bg-red-600 rounded-full"></div>
+                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wider">New Items</p>
+                  </div>
+                  <p className="text-4xl font-black text-black mb-2">{stats.newCount}</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-1 bg-gradient-to-r from-red-600 to-red-400 rounded-full"></div>
+                    <span className="text-xs font-semibold text-gray-400">PENDING REVIEW</span>
+                  </div>
+                </div>
+                <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-700 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
+                  <Clock className="w-8 h-8 text-white" />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-sm p-6 border">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <BarChart3 className="w-8 h-8 text-purple-600" />
+          {/* With Links Card */}
+          <div className="relative bg-white rounded-3xl p-8 border-2 border-gray-100 shadow-md hover:shadow-lg transition-all duration-500 group overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-50 to-blue-100 rounded-full -mr-16 -mt-16 opacity-50"></div>
+            <div className="relative z-10">
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wider">With Links</p>
+                  </div>
+                  <p className="text-4xl font-black text-black mb-2">{stats.withLinks}</p>
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-1 bg-gradient-to-r from-blue-600 to-blue-400 rounded-full"></div>
+                    <span className="text-xs font-semibold text-gray-400">LINKED CONTENT</span>
+                  </div>
+                </div>
+                <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
+                  <CheckCircle className="w-8 h-8 text-white" />
+                </div>
               </div>
-              <div className="ml-5 w-0 flex-1">
-                <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">Without Links</dt>
-                  <dd className="text-2xl font-semibold text-gray-900">{stats.withoutLinks}</dd>
-                </dl>
+            </div>
+          </div>
+
+          {/* Processing Card */}
+          <div className="relative bg-white rounded-3xl p-8 border-2 border-gray-100 shadow-md hover:shadow-lg transition-all duration-500 group overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-red-50 to-red-100 rounded-full -mr-16 -mt-16 opacity-50"></div>
+            <div className="relative z-10">
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`w-3 h-3 bg-red-600 rounded-full ${optimisticRows.length > 0 ? 'animate-pulse' : ''}`}></div>
+                    <p className="text-sm font-bold text-gray-500 uppercase tracking-wider">Processing</p>
+                  </div>
+                  <p className="text-4xl font-black text-black mb-2">{optimisticRows.length}</p>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-6 h-1 bg-gradient-to-r from-red-600 to-red-400 rounded-full ${optimisticRows.length > 0 ? 'animate-pulse' : ''}`}></div>
+                    <span className="text-xs font-semibold text-gray-400">IN PROGRESS</span>
+                  </div>
+                </div>
+                <div className="w-16 h-16 bg-gradient-to-br from-red-600 to-red-700 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 group-hover:rotate-3 transition-all duration-300">
+                  <Loader2 className={`w-8 h-8 text-white ${optimisticRows.length > 0 ? 'animate-spin' : ''}`} />
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="bg-white rounded-lg shadow-sm border mb-6">
-          <div className="p-6 border-b border-gray-200">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search articles or keywords..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+        {/* Enhanced Search & Filter Section */}
+        <div className="bg-gradient-to-r from-white via-blue-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg mb-8 overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
+            <div className="bg-white rounded-[20px] p-6">
+              <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
+                <div className="flex-1 max-w-md">
+                  <div className="relative group">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-blue-400/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative">
+                      <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-blue-600 z-10" />
+                      <input
+                        type="text"
+                        placeholder="Search articles, keywords..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-12 pr-4 py-3 bg-gradient-to-r from-gray-50 to-blue-50/50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 focus:bg-white transition-all duration-300 text-black placeholder-gray-500 font-medium shadow-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="flex gap-3">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="all">All Statuses</option>
-                  <option value="new">New</option>
-                  <option value="writing">Writing</option>
-                  <option value="Used">Rewrite</option>
-                </select>
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 bg-gradient-to-r from-gray-50 to-blue-50/50 px-4 py-2 rounded-xl border border-gray-200">
+                    <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                    <Filter className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-bold text-gray-700">Filter:</span>
+                  </div>
+                  <div className="relative group">
+                    <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-red-600/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="relative px-4 py-2.5 bg-gradient-to-r from-gray-50 to-blue-50/50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 text-black font-bold min-w-[140px] shadow-sm hover:shadow-md"
+                    >
+                      <option value="all">All Statuses</option>
+                      <option value="new">New</option>
+                      <option value="writing">Writing</option>
+                      <option value="Used">Completed</option>
+                      <option value="processing">Processing</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Table */}
-          <div className="overflow-x-auto">
+        {/* Enhanced Professional Table */}
+        <div className="bg-gradient-to-r from-white via-gray-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg overflow-hidden">
+          <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
+            <div className="bg-white rounded-[20px] overflow-hidden">
             {loading && (
-              <div className="flex items-center justify-center py-12">
-                <RefreshCw className="w-6 h-6 animate-spin text-blue-600 mr-3" />
-                <span className="text-gray-600">Loading articles...</span>
+              <div className="flex items-center justify-center py-16">
+                <div className="flex flex-col items-center space-y-4">
+                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                  <span className="text-slate-600 font-medium">Loading articles...</span>
+                </div>
               </div>
             )}
             
             {!loading && paginatedArticles.length === 0 && (
-              <div className="text-center py-12">
-                <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No articles found</h3>
-                <p className="text-gray-500">
+              <div className="text-center py-16">
+                <div className="w-16 h-16 bg-gradient-to-br from-gray-100 to-gray-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <FileText className="w-8 h-8 text-gray-400" />
+                </div>
+                <h3 className="text-xl font-semibold text-black mb-2">No articles found</h3>
+                <p className="text-gray-600 max-w-md mx-auto">
                   {searchTerm || statusFilter !== 'all' 
-                    ? 'Try adjusting your search or filters' 
-                    : 'No articles have been added yet'}
+                    ? 'Try adjusting your search or filters to find what you\'re looking for' 
+                    : 'Get started by creating your first article'}
                 </p>
               </div>
             )}
             
             {!loading && paginatedArticles.length > 0 && (
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">
-                    Title
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
-                    Keyword
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-2/5">
-                    Doc Link
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                    Content
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle) => (
-                  <tr key={`${article.id}`} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-6 py-4 align-top">
-                      <div className="text-sm text-gray-900 font-medium break-words">
-                        {article.title}
+            <div className="overflow-x-auto">
+              <table className="w-full table-fixed">
+                <thead className="bg-gradient-to-r from-blue-50/50 via-gray-50 to-red-50/50">
+                  <tr className="border-b-[3px] border-gray-200">
+                    <th className="w-[35%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
+                          <FileText className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Article Title</span>
+                      </div>
+                    </th>
+                    <th className="w-[15%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
+                          <Search className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Keyword</span>
+                      </div>
+                    </th>
+                    <th className="w-[25%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
+                          <Eye className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Document Link</span>
+                      </div>
+                    </th>
+                    <th className="w-[15%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
+                          <FileText className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Content</span>
+                      </div>
+                    </th>
+                    <th className="w-[10%] px-8 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center justify-center">
+                        <span className="bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent">Actions</span>
+                      </div>
+                                        </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-100">
+                {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => (
+                  <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 border-transparent hover:border-blue-500 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                    <td className="px-8 py-6">
+                      {article._temp ? (
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg">
+                            <Loader2 className="w-5 h-5 animate-spin text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-black text-base">Article is processing...</div>
+                            <div className="text-sm text-gray-600 mt-1">Please wait while we generate your content</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="group cursor-pointer">
+                          <div className="font-bold text-black text-base group-hover:text-blue-600 transition-colors duration-200 line-clamp-3 leading-relaxed">
+                            {article.title}
+                          </div>
+                          <div className="text-xs text-gray-500 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            Click to view details
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="flex justify-start">
+                        <span className="inline-flex items-center px-4 py-2 rounded-full text-sm font-bold bg-gradient-to-r from-blue-100 to-blue-200 text-blue-900 border-2 border-blue-300 shadow-sm">
+                          {article.keyword}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 align-top">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        {article.keyword}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 align-top">
+                    <td className="px-8 py-6">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processing...€¦</span>
+                        <div className="space-y-3">
+                          <div className="w-full h-5 bg-gray-200 rounded-lg animate-pulse" />
+                          <div className="w-4/5 h-4 bg-gray-200 rounded-lg animate-pulse" />
+                          <div className="w-3/5 h-3 bg-gray-200 rounded animate-pulse" />
+                        </div>
                       ) : (
-                        renderDocLink(article.doc_link)
+                        <div className="break-all">
+                          {renderDocLink(article.doc_link)}
+                        </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 align-top">
+                    <td className="px-8 py-6">
                       {article._temp ? (
-                        <span className="text-gray-400 text-sm font-medium">Processing...€¦</span>
+                        <div className="w-28 h-10 bg-gray-200 rounded-xl animate-pulse" />
                       ) : (
-                        renderContentLink(article.title, article.content)
+                        <div className="flex items-center justify-center">
+                          {renderContentLink(article.title, article.content)}
+                        </div>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap align-top">
-                      {article._temp ? (
-                        getStatusBadge(article.status)
-                      ) : (
-                        article.status === 'new' ? (
-                          (() => {
-                            const isWriting = writingIds.has(String(article.id ?? article.title));
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => handleWriteForArticle(article)}
-                                disabled={isWriting}
-                                className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
-                              >
-                                {isWriting ? 'Sending...' : 'Write'}
-                              </button>
-                            );
-                          })()
-                        ) : article.status === 'Used' ? (
-                          (() => {
-                            const key = String(article.id ?? article.title);
-                            const isRewriting = rewritingIds.has(key);
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => handleRewriteForArticle(article as ResearchArticle)}
-                                disabled={isRewriting}
-                                className="text-emerald-600 hover:underline text-sm font-medium disabled:opacity-50"
-                              >
-                                {isRewriting ? 'Sending...' : 'Rewrite'}
-                              </button>
-                            );
-                          })()
+                    <td className="px-8 py-6">
+                      <div className="flex items-center justify-center">
+                        {article._temp ? (
+                          <div className="flex items-center justify-center">
+                            {getStatusBadge(article.status)}
+                          </div>
                         ) : (
-                          getStatusBadge(article.status)
-                        )
-                      )}
+                          <div className="flex items-center gap-3">
+                            {article.status === 'new' ? (
+                              (() => {
+                                const isWriting = writingIds.has(String(article.id ?? article.title));
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleWriteForArticle(article)}
+                                    disabled={isWriting}
+                                    className="inline-flex items-center px-5 py-3 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                                  >
+                                    {isWriting ? (
+                                      <>
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        Writing...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Edit3 className="w-4 h-4 mr-2" />
+                                        Write
+                                      </>
+                                    )}
+                                  </button>
+                                );
+                              })()
+                            ) : article.status === 'Used' ? (
+                              (() => {
+                                const key = String(article.id ?? article.title);
+                                const isRewriting = rewritingIds.has(key);
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRewriteForArticle(article as ResearchArticle)}
+                                    disabled={isRewriting}
+                                    className="inline-flex items-center px-5 py-3 text-sm font-bold text-white bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                                  >
+                                    {isRewriting ? (
+                                      <>
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                        Rewriting...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="w-4 h-4 mr-2" />
+                                        Rewrite
+                                      </>
+                                    )}
+                                  </button>
+                                );
+                              })()
+                            ) : (
+                              <div className="flex items-center justify-center">
+                                {getStatusBadge(article.status)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
             )}
           </div>
 
-          {/* Pagination */}
+          {/* Enhanced Professional Pagination */}
           {!loading && totalPages > 1 && (
-            <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-              <div className="flex-1 flex justify-between sm:hidden">
-                <button
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  disabled={currentPage === 1}
-                  className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                  disabled={currentPage === totalPages}
-                  className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
-              </div>
-              <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm text-gray-700">
-                    Showing <span className="font-medium">{startIndex + 1}</span> to{' '}
-                    <span className="font-medium">{Math.min(startIndex + itemsPerPage, filteredArticles.length)}</span> of{' '}
-                    <span className="font-medium">{filteredArticles.length}</span> results
-                  </p>
+            <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-8 py-6 border-t-2 border-gray-200 rounded-b-2xl">
+              <div className="flex items-center justify-between">
+                <div className="flex-1 flex justify-between sm:hidden">
+                  <button
+                    onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                    disabled={currentPage === 1}
+                    className="relative inline-flex items-center px-6 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                    disabled={currentPage === totalPages}
+                    className="relative inline-flex items-center px-6 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                  >
+                    Next
+                  </button>
                 </div>
-                <div>
-                  <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                    <button
-                      onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                      disabled={currentPage === 1}
-                      className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Previous
-                    </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <div className="hidden sm:flex sm:items-center sm:justify-between sm:flex-1">
+                  <div className="bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm">
+                    <p className="text-sm text-gray-600">
+                      Showing <span className="font-bold text-black">{startIndex + 1}</span> to{' '}
+                      <span className="font-bold text-black">{Math.min(startIndex + itemsPerPage, filteredArticles.length)}</span> of{' '}
+                      <span className="font-bold text-blue-600">{filteredArticles.length}</span> results
+                    </p>
+                  </div>
+                  <div>
+                    <nav className="flex items-center space-x-3">
                       <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                          page === currentPage
-                            ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
-                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                        }`}
+                        onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
+                        disabled={currentPage === 1}
+                        className="inline-flex items-center px-5 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
                       >
-                        {page}
+                        Previous
                       </button>
-                    ))}
-                    <button
-                      onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                      disabled={currentPage === totalPages}
-                      className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Next
-                    </button>
-                  </nav>
+                      <div className="flex items-center space-x-2">
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                          <button
+                            key={page}
+                            onClick={() => setCurrentPage(page)}
+                            className={`inline-flex items-center px-4 py-3 text-sm font-bold rounded-xl transition-all duration-200 shadow-sm ${
+                              page === currentPage
+                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg border-2 border-blue-500 transform scale-110'
+                                : 'text-black bg-white border-2 border-gray-300 hover:bg-gray-50 hover:border-blue-400'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
+                        disabled={currentPage === totalPages}
+                        className="inline-flex items-center px-5 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                      >
+                        Next
+                      </button>
+                    </nav>
+                  </div>
                 </div>
               </div>
             </div>
           )}
+          </div>
         </div>
+        
+        {/* Back to Top Button */}
+        {showScrollTop && (
+          <button
+            type="button"
+            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            className="fixed bottom-6 right-6 z-40 inline-flex items-center justify-center w-12 h-12 rounded-full text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-lg hover:shadow-xl transition-all duration-200"
+            aria-label="Back to top"
+          >
+            <ArrowUp className="w-5 h-5" />
+          </button>
+        )}
+
         {/* Floating Chat Widget (bottom-left) */}
         <ChatWidget webhookUrl="https://groundstandard.app.n8n.cloud/webhook/chat-bot" />
+        {toast && (
+          <div className="fixed top-6 right-6 z-50 animate-in slide-in-from-right-full duration-300">
+            <div className="bg-white/90 backdrop-blur-sm border border-gray-200 text-black px-6 py-4 rounded-xl shadow-xl text-sm font-medium max-w-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <CheckCircle className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex-1">
+                  {toast}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
