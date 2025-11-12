@@ -46,6 +46,10 @@ export default function Dashboard() {
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [articleToWrite, setArticleToWrite] = useState<ResearchArticle | null>(null);
   const [wordLimit, setWordLimit] = useState<number>(1000);
+  // Modal state for Rewrite prompt
+  const [showRewriteModal, setShowRewriteModal] = useState(false);
+  const [articleToRewrite, setArticleToRewrite] = useState<ResearchArticle | null>(null);
+  const [rewriteInstructions, setRewriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
   const [extraKeywords, setExtraKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState<string>('');
@@ -58,8 +62,10 @@ export default function Dashboard() {
       2500: { min: 6, max: 7 },
       3000: { min: 7, max: 9 },
     };
+
     return map[wordLimit] || { min: 2, max: 3 };
   }, [wordLimit]);
+
   const maxKeywords = useMemo(() => {
     const map: Record<number, number> = {
       500: 0,
@@ -71,6 +77,23 @@ export default function Dashboard() {
     };
     return map[wordLimit] || 0;
   }, [wordLimit]);
+
+  // Open modal to ask for rewrite prompt
+  const handleOpenRewriteModal = (article: ResearchArticle) => {
+    setArticleToRewrite(article);
+    setRewriteInstructions('');
+    setShowRewriteModal(true);
+  };
+
+  // Confirm rewrite with user-provided instructions
+  const handleConfirmRewrite = async () => {
+    if (!articleToRewrite) return;
+    const a = articleToRewrite;
+    setShowRewriteModal(false);
+    setArticleToRewrite(null);
+    await handleRewriteForArticle(a, rewriteInstructions.trim() || undefined);
+  };
+
   // Optimistic placeholder rows inserted immediately after sending a keyword
   type OptimisticArticle = {
     id: string; // temp id
@@ -140,8 +163,8 @@ export default function Dashboard() {
     }
   };
 
-  // Send rewrite request directly to the provided webhook
-  const handleRewriteForArticle = async (article: ResearchArticle) => {
+  // Send rewrite request directly to the provided webhook (optionally include instructions)
+  const handleRewriteForArticle = async (article: ResearchArticle, instructions?: string) => {
     if (!article) return;
     const key = String(article.id ?? article.title);
     setRewritingIds(prev => new Set(prev).add(key));
@@ -159,6 +182,7 @@ export default function Dashboard() {
         mentions_per_keyword?: { min: number; max: number };
         action?: string;
         source?: string;
+        instructions?: string;
       };
       const payloads: RewritePayload[] = [
         {
@@ -173,9 +197,10 @@ export default function Dashboard() {
           mentions_per_keyword: { min: 2, max: 3 },
           action: 'rewrite',
           source: 'dashboard-rewrite',
+          instructions: instructions || undefined,
         },
-        { id: article.id, title: article.title, action: 'rewrite' },
-        { doc_link: article.doc_link ?? null, action: 'rewrite' },
+        { id: article.id, title: article.title, action: 'rewrite', instructions: instructions || undefined },
+        { doc_link: article.doc_link ?? null, action: 'rewrite', instructions: instructions || undefined },
       ];
       let ok = false;
       let lastTxt = '';
@@ -715,6 +740,59 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Rewrite Prompt Modal */}
+      {showRewriteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+          />
+          <div className="relative bg-white w-full max-w-lg mx-auto rounded-lg shadow-lg border p-6 z-10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Rewrite Article</h3>
+              <button
+                onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+                className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {articleToRewrite && (
+              <p className="text-sm text-gray-600 mb-3">{articleToRewrite.title}</p>
+            )}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Instructions or prompt</label>
+                <textarea
+                  value={rewriteInstructions}
+                  onChange={(e) => setRewriteInstructions(e.target.value)}
+                  rows={5}
+                  placeholder="Describe how you want the content to be rewritten (tone, target audience, include/exclude parts, etc.)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmRewrite}
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700"
+                >
+                  Rewrite
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Write Options Modal */}
       {showWriteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1157,7 +1235,7 @@ export default function Dashboard() {
                                 return (
                                   <button
                                     type="button"
-                                    onClick={() => handleRewriteForArticle(article as ResearchArticle)}
+                                    onClick={() => handleOpenRewriteModal(article as ResearchArticle)}
                                     disabled={isRewriting}
                                     className="inline-flex items-center px-5 py-3 text-sm font-bold text-white bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                                   >
