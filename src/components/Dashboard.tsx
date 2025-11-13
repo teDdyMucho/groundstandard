@@ -1172,6 +1172,7 @@ export default function Dashboard() {
                 {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => {
                   const rowKey = String((article as any).id ?? (article as any).title);
                   const isRewriting = rewritingIds.has(rowKey);
+                  const isWritingRow = writingIds.has(rowKey);
                   return (
                   <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 border-transparent hover:border-blue-500 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                     <td className="px-8 py-6">
@@ -1210,6 +1211,14 @@ export default function Dashboard() {
                           <div className="w-4/5 h-4 bg-gray-200 rounded-lg animate-pulse" />
                           <div className="w-3/5 h-3 bg-gray-200 rounded animate-pulse" />
                         </div>
+                      ) : isWritingRow ? (
+                        <div className="flex items-center gap-3">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.85)]" />
+                          </span>
+                          <span className="text-sm font-semibold text-blue-700">Writing link…</span>
+                        </div>
                       ) : isRewriting ? (
                         <div className="flex items-center gap-3">
                           <span className="relative flex h-3 w-3">
@@ -1227,6 +1236,14 @@ export default function Dashboard() {
                     <td className="px-8 py-6">
                       {article._temp ? (
                         <div className="w-28 h-10 bg-gray-200 rounded-xl animate-pulse" />
+                      ) : isWritingRow ? (
+                        <div className="flex items-center justify-center gap-3">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.85)]" />
+                          </span>
+                          <span className="text-sm font-semibold text-blue-700">Writing content…</span>
+                        </div>
                       ) : isRewriting ? (
                         <div className="flex items-center justify-center gap-3">
                           <span className="relative flex h-3 w-3">
@@ -1244,8 +1261,9 @@ export default function Dashboard() {
                     <td className="px-8 py-6">
                       <div className="flex items-center justify-center">
                         {article._temp ? (
-                          <div className="flex items-center justify-center">
-                            {getStatusBadge(article.status)}
+                          <div className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-semibold text-white bg-gradient-to-r from-red-600 to-rose-600 shadow-sm">
+                            <Loader2 className="w-3 h-3 mr-2 animate-spin" />
+                            Processing
                           </div>
                         ) : (
                           <div className="flex flex-col items-center gap-2 justify-center">
