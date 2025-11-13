@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, type FormEvent } from 'react';
-import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp } from 'lucide-react';
+import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp, Trash } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
 import type { ResearchArticle } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 export default function Dashboard() {
   const { articles, loading, error, refetch } = useResearchData();
@@ -42,6 +43,8 @@ export default function Dashboard() {
   const [writingIds, setWritingIds] = useState<Set<string>>(new Set());
   // Track which rows are sending a Rewrite request
   const [rewritingIds, setRewritingIds] = useState<Set<string>>(new Set());
+  // Track rows being deleted
+  const [deletingIds, setDeletingIds] = useState<Set<string | number>>(new Set());
   // Modal state for selecting word limit for Write
   const [showWriteModal, setShowWriteModal] = useState(false);
   const [articleToWrite, setArticleToWrite] = useState<ResearchArticle | null>(null);
@@ -355,16 +358,39 @@ export default function Dashboard() {
       // After a successful request, refresh data to reflect any status changes
       setTimeout(() => { refetch(); }, 800);
     } catch (err) {
-      console.error(err);
-      if (err instanceof Error) {
-        window.alert(`Failed to send write request: ${err.message}`);
-      } else {
-        window.alert('Failed to send write request');
-      }
+      console.error('Delete failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete row';
+      window.alert(msg);
     } finally {
       setWritingIds(prev => {
         const next = new Set(prev);
         next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  // Delete an article by id from Supabase
+  const handleDeleteArticle = async (id: number | string, title?: string) => {
+    if (id === undefined || id === null) return;
+    const confirmed = window.confirm(`Delete this item${title ? `: "${title}"` : ''}? This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingIds(prev => new Set(prev).add(id));
+    try {
+      const { error: delError } = await supabase
+        .from('Research')
+        .delete()
+        .eq('id', id);
+      if (delError) throw delError;
+      await refetch();
+    } catch (err) {
+      console.error('Delete failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete row';
+      window.alert(msg);
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
         return next;
       });
     }
@@ -1075,7 +1101,7 @@ export default function Dashboard() {
         <div className="bg-gradient-to-r from-white via-gray-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
             <div className="bg-white rounded-[20px] overflow-hidden">
-            {loading && (
+            {loading && paginatedArticles.length === 0 && rewritingIds.size === 0 && (
               <div className="flex items-center justify-center py-16">
                 <div className="flex flex-col items-center space-y-4">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -1098,7 +1124,7 @@ export default function Dashboard() {
               </div>
             )}
             
-            {!loading && paginatedArticles.length > 0 && (
+            {paginatedArticles.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full table-fixed">
                 <thead className="bg-gradient-to-r from-blue-50/50 via-gray-50 to-red-50/50">
@@ -1143,7 +1169,10 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => (
+                {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => {
+                  const rowKey = String((article as any).id ?? (article as any).title);
+                  const isRewriting = rewritingIds.has(rowKey);
+                  return (
                   <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 border-transparent hover:border-blue-500 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                     <td className="px-8 py-6">
                       {article._temp ? (
@@ -1181,18 +1210,34 @@ export default function Dashboard() {
                           <div className="w-4/5 h-4 bg-gray-200 rounded-lg animate-pulse" />
                           <div className="w-3/5 h-3 bg-gray-200 rounded animate-pulse" />
                         </div>
+                      ) : isRewriting ? (
+                        <div className="flex items-center gap-3">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.85)]" />
+                          </span>
+                          <span className="text-sm font-semibold bg-gradient-to-r from-red-600 to-rose-500 bg-clip-text text-transparent animate-pulse">Updating link…</span>
+                        </div>
                       ) : (
                         <div className="break-all">
-                          {renderDocLink(article.doc_link)}
+                          {renderDocLink((article as any).doc_link)}
                         </div>
                       )}
                     </td>
                     <td className="px-8 py-6">
                       {article._temp ? (
                         <div className="w-28 h-10 bg-gray-200 rounded-xl animate-pulse" />
+                      ) : isRewriting ? (
+                        <div className="flex items-center justify-center gap-3">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.85)]" />
+                          </span>
+                          <span className="text-sm font-semibold bg-gradient-to-r from-red-600 to-rose-500 bg-clip-text text-transparent animate-pulse">Updating content…</span>
+                        </div>
                       ) : (
                         <div className="flex items-center justify-center">
-                          {renderContentLink(article.title, article.content)}
+                          {renderContentLink((article as any).title, (article as any).content)}
                         </div>
                       )}
                     </td>
@@ -1203,67 +1248,69 @@ export default function Dashboard() {
                             {getStatusBadge(article.status)}
                           </div>
                         ) : (
-                          <div className="flex items-center gap-3">
+                          <div className="flex flex-col items-center gap-2 justify-center">
                             {article.status === 'new' ? (
                               (() => {
-                                const isWriting = writingIds.has(String(article.id ?? article.title));
+                                const isWriting = writingIds.has(String((article as any).id ?? (article as any).title));
                                 return (
                                   <button
                                     type="button"
-                                    onClick={() => handleWriteForArticle(article)}
+                                    onClick={() => handleWriteForArticle(article as ResearchArticle)}
                                     disabled={isWriting}
-                                    className="inline-flex items-center px-5 py-3 text-sm font-bold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                                    className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                   >
                                     {isWriting ? (
-                                      <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Writing...
-                                      </>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
                                     ) : (
-                                      <>
-                                        <Edit3 className="w-4 h-4 mr-2" />
-                                        Write
-                                      </>
+                                      <Edit3 className="w-4 h-4" />
                                     )}
+                                    <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[120px] group-hover:opacity-100 transition-all duration-200 whitespace-nowrap font-semibold text-sm ml-0 group-hover:ml-2">Write</span>
                                   </button>
                                 );
                               })()
                             ) : article.status === 'Used' ? (
-                              (() => {
-                                const key = String(article.id ?? article.title);
-                                const isRewriting = rewritingIds.has(key);
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenRewriteModal(article as ResearchArticle)}
-                                    disabled={isRewriting}
-                                    className="inline-flex items-center px-5 py-3 text-sm font-bold text-white bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                                  >
-                                    {isRewriting ? (
-                                      <>
-                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        Rewriting...
-                                      </>
-                                    ) : (
-                                      <>
-                                        <RefreshCw className="w-4 h-4 mr-2" />
-                                        Rewrite
-                                      </>
-                                    )}
-                                  </button>
-                                );
-                              })()
+                              (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRewriteModal(article as ResearchArticle)}
+                                  disabled={isRewriting}
+                                  className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {isRewriting ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="w-4 h-4" />
+                                  )}
+                                  <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[120px] group-hover:opacity-100 transition-all duration-200 whitespace-nowrap font-semibold text-sm ml-0 group-hover:ml-2">Rewrite</span>
+                                </button>
+                              )
                             ) : (
                               <div className="flex items-center justify-center">
-                                {getStatusBadge(article.status)}
+                                {getStatusBadge((article as any).status)}
                               </div>
                             )}
+                            {/* Delete button for any non-temp row */}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteArticle((article as any).id, (article as any).title)}
+                              disabled={deletingIds.has((article as any).id)}
+                              className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50"
+                              title="Delete"
+                            >
+                              {deletingIds.has((article as any).id) ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash className="w-4 h-4" />
+                              )}
+                              <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[120px] group-hover:opacity-100 transition-all duration-200 whitespace-nowrap font-semibold text-sm ml-0 group-hover:ml-2">Delete</span>
+                            </button>
                           </div>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
             </div>
