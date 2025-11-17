@@ -11,6 +11,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
 
   // Back-to-top visibility
   const [showScrollTop, setShowScrollTop] = useState(false);
@@ -431,6 +432,66 @@ export default function Dashboard() {
   const totalPages = Math.ceil(filteredArticles.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedArticles = filteredArticles.slice(startIndex, startIndex + itemsPerPage);
+
+  const toggleSelectAllOnPage = () => {
+    const idsOnPage = paginatedArticles
+      .filter(a => !(a as any)._temp)
+      .map(a => (a as any).id)
+      .filter((id) => id !== undefined && id !== null);
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      const allSelected = idsOnPage.every(id => next.has(id));
+      if (allSelected) {
+        idsOnPage.forEach(id => next.delete(id));
+      } else {
+        idsOnPage.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectOne = (id: number | string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const idsToDelete = Array.from(selectedIds).filter(id => id !== undefined && id !== null);
+    if (idsToDelete.length === 0) return;
+    const confirmed = window.confirm(`Delete ${idsToDelete.length} selected item${idsToDelete.length > 1 ? 's' : ''}? This cannot be undone.`);
+    if (!confirmed) return;
+    setDeletingIds(prev => {
+      const next = new Set(prev);
+      idsToDelete.forEach(id => next.add(id));
+      return next;
+    });
+    try {
+      const { error: delError } = await supabase
+        .from('Research')
+        .delete()
+        .in('id', idsToDelete as any);
+      if (delError) throw delError;
+      setSelectedIds(new Set());
+      await refetch();
+    } catch (err) {
+      console.error('Bulk delete failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete selected rows';
+      window.alert(msg);
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        idsToDelete.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  };
 
   // Prune optimistic placeholders as real rows arrive for a given keyword
   // If we detect N real rows for a keyword, remove up to N placeholders for that keyword.
@@ -1101,6 +1162,21 @@ export default function Dashboard() {
         <div className="bg-gradient-to-r from-white via-gray-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
             <div className="bg-white rounded-[20px] overflow-hidden">
+            {paginatedArticles.length > 0 && selectedIds.size > 0 && (
+              <div className="flex items-center justify-between px-6 pt-4 pb-2">
+                <div className="text-sm text-gray-600">
+                  <span className="font-medium">{selectedIds.size} selected</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleBulkDelete}
+                  className="inline-flex items-center px-4 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 shadow-sm hover:shadow-md transition-all duration-200"
+                >
+                  <Trash className="w-4 h-4 mr-2" />
+                  Delete selected
+                </button>
+              </div>
+            )}
             {loading && paginatedArticles.length === 0 && rewritingIds.size === 0 && (
               <div className="flex items-center justify-center py-16">
                 <div className="flex flex-col items-center space-y-4">
@@ -1129,7 +1205,18 @@ export default function Dashboard() {
               <table className="w-full table-fixed">
                 <thead className="bg-gradient-to-r from-blue-50/50 via-gray-50 to-red-50/50">
                   <tr className="border-b-[3px] border-gray-200">
-                    <th className="w-[35%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[4%] px-4 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
+                      {selectedIds.size > 0 && (
+                        <input
+                          type="checkbox"
+                          checked={paginatedArticles
+                            .filter(a => !(a as any)._temp)
+                            .every(a => selectedIds.has((a as any).id)) && paginatedArticles.filter(a => !(a as any)._temp).length > 0}
+                          onChange={toggleSelectAllOnPage}
+                        />
+                      )}
+                    </th>
+                    <th className="w-[33%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <FileText className="w-4 h-4 text-white" />
@@ -1137,7 +1224,7 @@ export default function Dashboard() {
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Article Title</span>
                       </div>
                     </th>
-                    <th className="w-[15%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[14%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <Search className="w-4 h-4 text-white" />
@@ -1145,7 +1232,7 @@ export default function Dashboard() {
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Keyword</span>
                       </div>
                     </th>
-                    <th className="w-[25%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[24%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <Eye className="w-4 h-4 text-white" />
@@ -1161,7 +1248,7 @@ export default function Dashboard() {
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Content</span>
                       </div>
                     </th>
-                    <th className="w-[10%] px-8 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[11%] px-8 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center justify-center">
                         <span className="bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent">Actions</span>
                       </div>
@@ -1175,6 +1262,15 @@ export default function Dashboard() {
                   const isWritingRow = writingIds.has(rowKey);
                   return (
                   <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 border-transparent hover:border-blue-500 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                    <td className="px-4 py-6 text-center">
+                      {!(article as any)._temp && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has((article as any).id)}
+                          onChange={() => toggleSelectOne((article as any).id)}
+                        />
+                      )}
+                    </td>
                     <td className="px-8 py-6">
                       {article._temp ? (
                         <div className="flex items-center gap-4">
