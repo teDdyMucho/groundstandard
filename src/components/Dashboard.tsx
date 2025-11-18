@@ -574,10 +574,77 @@ export default function Dashboard() {
     if (!trimmed) {
       return <span className="text-gray-400 text-sm">Click "Write" to generate content</span>;
     }
+
+    // Remove the first <h1>...</h1> so the modal header title isn't duplicated in the body
+    const stripped = trimmed.replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, '').trim();
+
+    // Start from the body HTML we actually want to show and normalize escaped newlines
+    let htmlForModal = (stripped || trimmed)
+      // webhook returns literal "\n\n" between paragraphs; turn into real blank lines
+      .replace(/\\n\\n/g, '\n\n')
+      .replace(/\\n/g, '\n');
+
+    // Treat "H2:" markers from the generator as Word-style section headings.
+    // We approximate the heading as the text from "H2:" up to the next period.
+    // Example: "H2: Upgrade the Graphics Card. For individuals..." becomes
+    // "<h2>Upgrade the Graphics Card</h2> For individuals..."
+    htmlForModal = htmlForModal.replace(
+      /H2:\s*(?:\d+\.\s*)?([^\.]+)\./g,
+      (_match, heading) => `<h2 style="font-size: 1.5rem; font-weight: bold;">${String(heading).trim()}</h2>`
+    );
+
+    // Pattern 1: lines like
+    //   https://example.com">Some label text
+    // Become a proper anchor where the URL is the href and the trailing text is the label
+    htmlForModal = htmlForModal.replace(
+      /(https?:\/\/[^"\s<>]+)"?>\s*([^\n<]+)/g,
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">$2<\/a>'
+    );
+
+    // Pattern 2: bare URLs with no trailing ">label
+    // Use a callback so we can avoid touching URLs that are already inside an href attribute
+    htmlForModal = htmlForModal.replace(
+      /(https?:\/\/[^\s<>"]+)/g,
+      (match, url, offset, full) => {
+        const before = (full as string).slice(0, offset as number);
+        if (before.endsWith('href="') || before.endsWith("href='")) {
+          // Already part of an href, leave it as-is
+          return match;
+        }
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${url}<\/a>`;
+      }
+    );
+
+    // If there are no existing <p> tags, create paragraphs and bullet lists
+    // from blank-line-separated blocks. This gives Word-like spacing.
+    if (!/<p[\s>]/i.test(htmlForModal)) {
+      const normalized = htmlForModal.replace(/\r\n/g, '\n');
+      const blocks = normalized.split(/\n\s*\n+/).map(b => b.trim()).filter(Boolean);
+      if (blocks.length > 0) {
+        htmlForModal = blocks
+          .map(block => {
+            const lines = block.split(/\n+/).map(l => l.trim()).filter(Boolean);
+            const allBullets = lines.length > 1 && lines.every(l => /^([•\-]\s+)/.test(l));
+            if (allBullets) {
+              const items = lines.map(l => l.replace(/^([•\-]\s+)/, ''));
+              return `<ul>${items.map(it => `<li>${it}</li>`).join('')}</ul>`;
+            }
+            return `<p>${block}</p>`;
+          })
+          .join('');
+      } else if (normalized.trim()) {
+        htmlForModal = `<p>${normalized.trim()}</p>`;
+      }
+    }
+
     return (
       <button
         type="button"
-        onClick={() => { setContentTitle(title); setContentToShow(trimmed); setShowContentModal(true); }}
+        onClick={() => {
+          setContentTitle(title);
+          setContentToShow(htmlForModal);
+          setShowContentModal(true);
+        }}
         className="text-indigo-600 hover:underline text-sm font-medium"
       >
         View content
@@ -1008,9 +1075,10 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="overflow-auto pr-1">
-              <pre className="whitespace-pre-wrap break-words text-sm text-gray-800">
-                {contentToShow}
-              </pre>
+              <div
+                className="prose prose-base max-w-none text-gray-800 leading-relaxed prose-p:my-3 prose-h2:mt-6 prose-h2:mb-2 prose-strong:font-semibold prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-a:text-blue-600 prose-a:underline"
+                dangerouslySetInnerHTML={{ __html: contentToShow }}
+              />
             </div>
           </div>
         </div>
