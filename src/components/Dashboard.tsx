@@ -593,7 +593,14 @@ export default function Dashboard() {
       (_match, heading) => `<h2 style="font-size: 1.5rem; font-weight: bold;">${String(heading).trim()}</h2>`
     );
 
-    // Pattern 1: lines like
+    // Pattern 1: phrases like "Click here https://example.com" or "Click here: https://example.com"
+    // Become a proper anchor where the visible text is "Click here" and the URL is the href
+    htmlForModal = htmlForModal.replace(
+      /(Click here)(?:\s*[:\-]\s*|\s+)(https?:\/\/[^\s<>"]+)/gi,
+      (_match, label, url) => `<a href="${String(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${String(label)}<\/a>`
+    );
+
+    // Pattern 2: lines like
     //   https://example.com">Some label text
     // Become a proper anchor where the URL is the href and the trailing text is the label
     htmlForModal = htmlForModal.replace(
@@ -601,7 +608,7 @@ export default function Dashboard() {
       '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">$2<\/a>'
     );
 
-    // Pattern 2: bare URLs with no trailing ">label
+    // Pattern 3: bare URLs with no trailing ">label
     // Use a callback so we can avoid touching URLs that are already inside an href attribute
     htmlForModal = htmlForModal.replace(
       /(https?:\/\/[^\s<>"]+)/g,
