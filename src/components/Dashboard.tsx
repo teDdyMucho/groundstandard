@@ -145,7 +145,19 @@ export default function Dashboard() {
   // Copy full content from the View Content Modal
   const handleCopyContent = async () => {
     try {
-      const text = (contentToShow ?? '').toString();
+      const html = String(contentToShow ?? '');
+      const pre = html
+        .replace(/<br\s*\/?>(?=\s*\n?)/gi, '\n')
+        .replace(/<\/(p|div)>/gi, '\n\n')
+        .replace(/<\/(h[1-6])>/gi, '\n\n')
+        .replace(/<li[^>]*>/gi, '• ')
+        .replace(/<\/(li)>/gi, '\n')
+        .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/<[^>]+>/g, '');
+      const text = (() => { const ta = document.createElement('textarea'); ta.innerHTML = pre; return ta.value; })()
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
       } else {
@@ -631,10 +643,19 @@ export default function Dashboard() {
         htmlForModal = blocks
           .map(block => {
             const lines = block.split(/\n+/).map(l => l.trim()).filter(Boolean);
-            const allBullets = lines.length > 1 && lines.every(l => /^([•\-]\s+)/.test(l));
+            const allBullets = lines.length > 1 && lines.every(l => /^(?:[•\-]\s+)/.test(l));
             if (allBullets) {
               const items = lines.map(l => l.replace(/^([•\-]\s+)/, ''));
               return `<ul>${items.map(it => `<li>${it}</li>`).join('')}</ul>`;
+            }
+            const single = lines.length === 1 ? lines[0] : '';
+            if (single) {
+              const words = single.split(/\s+/);
+              const caps = words.filter(w => /^(?:[A-Z][a-z]|THC|CBD|NJ|USA)/.test(w)).length;
+              const looksLikeHeading = single.length < 90 && !/[.!?]$/.test(single) && (caps / Math.max(1, words.length)) >= 0.5;
+              if (looksLikeHeading) {
+                return `<h2 style="font-size:1.5rem;font-weight:800;">${single}</h2>`;
+              }
             }
             return `<p>${block}</p>`;
           })
@@ -1083,7 +1104,7 @@ export default function Dashboard() {
             </div>
             <div className="overflow-auto pr-1">
               <div
-                className="prose prose-base max-w-none text-gray-800 leading-relaxed prose-p:my-3 prose-h2:mt-6 prose-h2:mb-2 prose-strong:font-semibold prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-a:text-blue-600 prose-a:underline"
+                className="prose prose-lg max-w-none text-gray-900 leading-relaxed prose-p:my-4 prose-h2:mt-6 prose-h2:mb-3 prose-h2:text-gray-900 prose-h2:font-extrabold prose-strong:font-semibold prose-ul:my-4 prose-ol:my-4 prose-li:my-1 prose-a:text-blue-600 prose-a:underline"
                 dangerouslySetInnerHTML={{ __html: contentToShow }}
               />
             </div>
