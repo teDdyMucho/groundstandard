@@ -606,10 +606,16 @@ export default function Dashboard() {
     );
 
     // Pattern 1: phrases like "Click here https://example.com" or "Click here: https://example.com"
-    // Become a proper anchor where the visible text is "Click here" and the URL is the href
+    // Become a proper anchor where the visible text is the URL (not the words "Click here")
     htmlForModal = htmlForModal.replace(
       /(Click here)(?:\s*[:\-]\s*|\s+)(https?:\/\/[^\s<>"]+)/gi,
-      (_match, label, url) => `<a href="${String(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${String(label)}<\/a>`
+      (_match, _label, url) => `<a href="${String(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${String(url)}<\/a>`
+    );
+
+    // Normalize any anchors whose inner text is literally "Click here" to display the actual URL
+    htmlForModal = htmlForModal.replace(
+      /<a([^>]*?)href="([^"]+)"([^>]*)>\s*(?:Click here|click here)\s*<\/a>/g,
+      '<a$1href="$2"$3>$2<\/a>'
     );
 
     // Pattern 2: lines like
