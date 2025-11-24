@@ -66,6 +66,8 @@ export default function Dashboard() {
   const [showRewriteModal, setShowRewriteModal] = useState(false);
   const [articleToRewrite, setArticleToRewrite] = useState<ResearchArticle | null>(null);
   const [rewriteInstructions, setRewriteInstructions] = useState<string>('');
+  // Optional instructions for Write
+  const [writeInstructions, setWriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
   const [extraKeywords, setExtraKeywords] = useState<string[]>([]);
   const [newKeyword, setNewKeyword] = useState<string>('');
@@ -395,6 +397,7 @@ export default function Dashboard() {
     setWordLimit(1000);
     setExtraKeywords([]);
     setNewKeyword('');
+    setWriteInstructions('');
     setShowWriteModal(true);
   };
 
@@ -440,6 +443,7 @@ export default function Dashboard() {
           word_limit: wordLimit,
           additional_keywords: extraKeywords,
           mentions_per_keyword: { min: mentionRange.min, max: mentionRange.max },
+          instructions: writeInstructions || undefined,
         })
       });
       if (!resp.ok) {
@@ -1009,6 +1013,8 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                   </div>
                 </div>
               )}
+
+              
               {sendSuccess && (
                 <div className="p-4 bg-green-50 border border-green-200 rounded-xl">
                   <div className="flex items-center gap-2">
@@ -1108,13 +1114,13 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
+            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); }}
           />
           <div className="relative bg-white w-full max-w-sm mx-auto rounded-lg shadow-lg border p-6 z-10">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Write Options</h3>
               <button
-                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
+                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); }}
                 className="p-2 rounded hover:bg-gray-100 text-gray-600"
                 aria-label="Close"
               >
@@ -1180,10 +1186,21 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
               </div>
               )}
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Instructions or prompt</label>
+                <textarea
+                  value={writeInstructions}
+                  onChange={(e) => setWriteInstructions(e.target.value)}
+                  placeholder="Describe how you want the content to be written (tone, target audience, include/exclude parts, etc.)"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm min-h-[96px]"
+                  rows={5}
+                />
+              </div>
+
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); }}
+                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
