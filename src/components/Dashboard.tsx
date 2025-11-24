@@ -41,9 +41,21 @@ export default function Dashboard() {
   // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
-  const [writingIds, setWritingIds] = useState<Set<string>>(new Set());
+  const [writingIds, setWritingIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('gs_writing_ids_v1');
+      const arr = raw ? (JSON.parse(raw) as string[]) : [];
+      return Array.isArray(arr) ? new Set(arr) : new Set();
+    } catch { return new Set(); }
+  });
   // Track which rows are sending a Rewrite request
-  const [rewritingIds, setRewritingIds] = useState<Set<string>>(new Set());
+  const [rewritingIds, setRewritingIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('gs_rewriting_ids_v1');
+      const arr = raw ? (JSON.parse(raw) as string[]) : [];
+      return Array.isArray(arr) ? new Set(arr) : new Set();
+    } catch { return new Set(); }
+  });
   // Track rows being deleted
   const [deletingIds, setDeletingIds] = useState<Set<string | number>>(new Set());
   // Modal state for selecting word limit for Write
@@ -136,11 +148,71 @@ export default function Dashboard() {
       // ignore storage errors
     }
   }, [optimisticRows]);
+  // Auto-polling disabled to avoid auto refresh; user uses Refresh button
+
+  // Persist in-flight write/rewrite across reloads
+  const WRITING_STORAGE_KEY = 'gs_writing_ids_v1';
+  const REWRITING_STORAGE_KEY = 'gs_rewriting_ids_v1';
+  const WRITING_META_KEY = 'gs_writing_meta_v1';
+  type WritingMeta = { id: number | string | undefined; title: string; keyword: string; startedAt?: number };
+  const [writingMeta, setWritingMeta] = useState<Record<string, WritingMeta>>(() => {
+    try {
+      const raw = localStorage.getItem('gs_writing_meta_v1');
+      const obj = raw ? JSON.parse(raw) as Record<string, WritingMeta> : {};
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch { return {}; }
+  });
+  // Already hydrated synchronously above; keep effects to persist changes only
   useEffect(() => {
-    if (optimisticRows.length === 0) return;
-    const id = setInterval(() => { refetch(); }, 5000);
-    return () => clearInterval(id);
-  }, [optimisticRows.length, refetch]);
+    try { localStorage.setItem(WRITING_STORAGE_KEY, JSON.stringify(Array.from(writingIds))); } catch {}
+  }, [writingIds]);
+  useEffect(() => {
+    try { localStorage.setItem(REWRITING_STORAGE_KEY, JSON.stringify(Array.from(rewritingIds))); } catch {}
+  }, [rewritingIds]);
+  useEffect(() => {
+    try { localStorage.setItem(WRITING_META_KEY, JSON.stringify(writingMeta)); } catch {}
+  }, [writingMeta]);
+
+  // Prune stale writing ids (older than 2h without a matching DB row)
+  useEffect(() => {
+    if (writingIds.size === 0) return;
+    const now = Date.now();
+    const maxAgeMs = 2 * 60 * 60 * 1000;
+    const list = articles || [];
+    const restored = Array.from(writingIds).filter(k => !!writingMeta[k]); // only keep ids we have meta for
+    const next = new Set<string>();
+    for (const key of restored) {
+      const existsInDb = list.some(a => String((a as any).id ?? (a as any).title) === key);
+      const meta = writingMeta[key];
+      const fresh = meta && typeof meta.startedAt === 'number' && (now - meta.startedAt) <= maxAgeMs;
+      if (existsInDb || fresh) next.add(key);
+    }
+    if (next.size !== writingIds.size) setWritingIds(next);
+  }, [articles, writingIds, writingMeta]);
+
+  useEffect(() => {
+    if (!articles) return;
+    if (writingIds.size === 0 && rewritingIds.size === 0) return;
+    let nextWriting = new Set(writingIds);
+    let nextRewriting = new Set(rewritingIds);
+    for (const a of articles) {
+      const idKey = String((a as any).id ?? '');
+      const titleKey = String((a as any).title ?? '');
+      const docLink = String((a as any).doc_link ?? '').trim();
+      const content = String((a as any).content ?? '').trim();
+      const status = String((a as any).status ?? '').trim();
+      const isCompleted = !!docLink || !!content || (status && status.toLowerCase() !== 'new') || docLink.toUpperCase() === 'EMPTY';
+      if (isCompleted) {
+        if (nextWriting.has(idKey)) { nextWriting.delete(idKey); }
+        if (nextWriting.has(titleKey)) { nextWriting.delete(titleKey); }
+        setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
+        if (nextRewriting.has(idKey)) { nextRewriting.delete(idKey); }
+        if (nextRewriting.has(titleKey)) { nextRewriting.delete(titleKey); }
+      }
+    }
+    if (nextWriting.size !== writingIds.size) setWritingIds(nextWriting);
+    if (nextRewriting.size !== rewritingIds.size) setRewritingIds(nextRewriting);
+  }, [articles, writingIds, rewritingIds]);
 
   // Copy full content from the View Content Modal
   const handleCopyContent = async () => {
@@ -232,7 +304,7 @@ export default function Dashboard() {
       if (!ok) {
         throw new Error(`Rewrite webhook returned non-200. Last response: ${lastTxt || 'No body'}`);
       }
-      setTimeout(() => { refetch(); }, 800);
+      // Do not auto refresh here
     } catch (err) {
       console.error(err);
       if (err instanceof Error) {
@@ -248,8 +320,8 @@ export default function Dashboard() {
       });
     }
   };
-  
 
+  // Send keyword request directly to the provided webhook
   const handleSendKeyword = async (e: FormEvent) => {
     e.preventDefault();
     if (!keywordInput.trim()) {
@@ -309,10 +381,7 @@ export default function Dashboard() {
       setCity('');
       setProvState('');
       setCallToAction('');
-      // Optionally refetch after a brief delay in case the webhook inserts into DB
-      setTimeout(() => {
-        refetch();
-      }, 1200);
+      // Do not auto refresh here
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send keyword');
     } finally {
@@ -320,8 +389,6 @@ export default function Dashboard() {
     }
   };
 
-  // Chat reset now lives inside ChatWidget
-  
   // Open modal to choose word limit for Write
   const handleWriteForArticle = (article: ResearchArticle) => {
     setArticleToWrite(article);
@@ -348,10 +415,21 @@ export default function Dashboard() {
   const handleConfirmWrite = async () => {
     if (!articleToWrite) return;
     const article = articleToWrite;
-    const key = String(article.id ?? article.title);
+    const idKey = String(article.id ?? '');
+    const titleKey = String(article.title ?? '');
     setShowWriteModal(false);
     setArticleToWrite(null);
-    setWritingIds(prev => new Set(prev).add(key));
+    setWritingIds(prev => {
+      const next = new Set(prev);
+      if (idKey) next.add(idKey);
+      if (titleKey) next.add(titleKey);
+      return next;
+    });
+    setWritingMeta(prev => ({
+      ...prev,
+      ...(idKey ? { [idKey]: { id: article.id as any, title: article.title, keyword: (article as any).keyword || '', startedAt: Date.now() } } : {}),
+      ...(titleKey ? { [titleKey]: { id: article.id as any, title: article.title, keyword: (article as any).keyword || '', startedAt: Date.now() } } : {}),
+    }));
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
         method: 'POST',
@@ -368,56 +446,98 @@ export default function Dashboard() {
         const txt = await resp.text();
         throw new Error(`Webhook error: ${resp.status} ${txt}`);
       }
-      // After a successful request, refresh data to reflect any status changes
-      setTimeout(() => { refetch(); }, 800);
+      // Do not auto refresh here; row stays marked as writing until backend completes
     } catch (err) {
       console.error('Delete failed', err);
       const msg = err instanceof Error ? err.message : 'Failed to delete row';
       window.alert(msg);
-    } finally {
+      // On error, clear pending state for this row
       setWritingIds(prev => {
         const next = new Set(prev);
-        next.delete(key);
+        next.delete(idKey);
+        next.delete(titleKey);
         return next;
       });
+      setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
     }
   };
 
-  // Delete an article by id from Supabase
-  const handleDeleteArticle = async (id: number | string, title?: string) => {
-    if (id === undefined || id === null) return;
-    const confirmed = window.confirm(`Delete this item${title ? `: "${title}"` : ''}? This cannot be undone.`);
-    if (!confirmed) return;
-    setDeletingIds(prev => new Set(prev).add(id));
-    try {
-      const { error: delError } = await supabase
-        .from('Research')
-        .delete()
-        .eq('id', id);
-      if (delError) throw delError;
-      await refetch();
-    } catch (err) {
-      console.error('Delete failed', err);
-      const msg = err instanceof Error ? err.message : 'Failed to delete row';
-      window.alert(msg);
-    } finally {
-      setDeletingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
-  };
+// Delete an article by id from Supabase
+const handleDeleteArticle = async (id: number | string, title?: string) => {
+  if (id === undefined || id === null) return;
+  const confirmed = window.confirm(`Delete this item${title ? `: "${title}"` : ''}? This cannot be undone.`);
+  if (!confirmed) return;
+  setDeletingIds(prev => new Set(prev).add(id));
+  try {
+    const { error: delError } = await supabase
+      .from('Research')
+      .delete()
+      .eq('id', id);
+    if (delError) throw delError;
+    // Clear any pending write/rewrite and meta for this id/title so placeholders don't linger
+    const idKey = String(id ?? '');
+    // If title isn't provided, try to find it from current articles
+    const titleKey = String(title ?? (articles?.find(a => String(a.id) === idKey)?.title ?? ''));
+    setWritingIds(prev => {
+      const next = new Set(prev);
+      next.delete(idKey);
+      if (titleKey) next.delete(titleKey);
+      return next;
+    });
+    setRewritingIds(prev => {
+      const next = new Set(prev);
+      next.delete(idKey);
+      if (titleKey) next.delete(titleKey);
+      return next;
+    });
+    setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
+    // Also drop any optimistic placeholders that match this title's keyword if present
+    setOptimisticRows(prev => prev.filter(r => r.id !== idKey));
+    await refetch();
+  } catch (err) {
+    console.error('Delete failed', err);
+    const msg = err instanceof Error ? err.message : 'Failed to delete row';
+    window.alert(msg);
+  } finally {
+    setDeletingIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+};
 
   const filteredArticles = useMemo(() => {
-    if (!articles) return [];
+    // Real articles may still be loading; show placeholders for writing rows from meta
+    const realArticles = articles || [];
     // Start with real articles
-    const real = articles.filter(article => {
+    const real = realArticles.filter(article => {
       const matchesSearch = article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           article.keyword.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesStatus = statusFilter === 'all' || article.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
+    // Add writing placeholders that aren't present in real articles
+    // Only include the most recent active writing placeholder to avoid duplicates
+    const keysByRecent = Array.from(writingIds).sort((a, b) => (writingMeta[b]?.startedAt || 0) - (writingMeta[a]?.startedAt || 0));
+    const activeKeys = keysByRecent.length > 0 ? [keysByRecent[0]] : [];
+    const placeholdersFromWriting: Array<ResearchArticle & { _temp?: false; createdTs?: number }> = [];
+    for (const key of activeKeys) {
+      const meta = writingMeta[key];
+      const exists = real.some(a => (
+        String((a as any).id ?? '') === String(meta?.id ?? '') ||
+        String((a as any).title ?? '') === String(meta?.title ?? '')
+      ));
+      if (!exists && meta) {
+        placeholdersFromWriting.push({
+          id: (meta.id as any) ?? key,
+          title: meta.title || 'Article is processing...',
+          keyword: meta.keyword || '',
+          doc_link: null as any,
+          status: 'new' as any,
+        } as unknown as ResearchArticle);
+      }
+    }
     // Add optimistic rows that match the filters
     const optimistic = optimisticRows.filter(row => {
       const matchesSearch = row.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -425,9 +545,9 @@ export default function Dashboard() {
       const matchesStatus = statusFilter === 'all' || row.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-    // Merge and sort: optimistic first (newest first), then real by id desc
+    // Merge and sort: optimistic placeholders (newest first), then real by id desc
     type ViewArticle = (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle;
-    const combined: ViewArticle[] = [...optimistic, ...real];
+    const combined: ViewArticle[] = [...placeholdersFromWriting, ...optimistic, ...real];
     combined.sort((a: ViewArticle, b: ViewArticle) => {
       const aTemp = !!a._temp;
       const bTemp = !!b._temp;
@@ -439,7 +559,9 @@ export default function Dashboard() {
       return bId - aId; // newest first
     });
     return combined;
-  }, [articles, searchTerm, statusFilter, optimisticRows]);
+  }, [articles, searchTerm, statusFilter, optimisticRows, writingIds, writingMeta]);
+
+  // Page does not auto-jump; user controls pagination
 
   const totalPages = Math.ceil(filteredArticles.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -1279,7 +1401,7 @@ export default function Dashboard() {
                 </button>
               </div>
             )}
-            {loading && paginatedArticles.length === 0 && rewritingIds.size === 0 && (
+            {loading && paginatedArticles.length === 0 && rewritingIds.size === 0 && writingIds.size === 0 && optimisticRows.length === 0 && (
               <div className="flex items-center justify-center py-16">
                 <div className="flex flex-col items-center space-y-4">
                   <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
@@ -1359,11 +1481,12 @@ export default function Dashboard() {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
                 {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => {
-                  const rowKey = String((article as any).id ?? (article as any).title);
-                  const isRewriting = rewritingIds.has(rowKey);
-                  const isWritingRow = writingIds.has(rowKey);
+                  const idKey = String((article as any).id ?? '');
+                  const titleKey = String((article as any).title ?? '');
+                  const isRewriting = rewritingIds.has(idKey) || rewritingIds.has(titleKey);
+                  const isWritingRow = writingIds.has(idKey) || writingIds.has(titleKey);
                   return (
-                  <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 border-transparent hover:border-blue-500 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                  <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 ${isWritingRow ? 'border-blue-500 ring-2 ring-blue-300/60' : 'border-transparent hover:border-blue-500'} ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                     <td className="px-4 py-6 text-center">
                       {!(article as any)._temp && (
                         <input
@@ -1375,6 +1498,16 @@ export default function Dashboard() {
                     </td>
                     <td className="px-8 py-6">
                       {article._temp ? (
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg">
+                            <Loader2 className="w-5 h-5 animate-spin text-white" />
+                          </div>
+                          <div className="flex-1">
+                            <div className="font-bold text-black text-base">Article is processing...</div>
+                            <div className="text-sm text-gray-600 mt-1">Please wait while we generate your content</div>
+                          </div>
+                        </div>
+                      ) : isWritingRow ? (
                         <div className="flex items-center gap-4">
                           <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg">
                             <Loader2 className="w-5 h-5 animate-spin text-white" />
@@ -1467,7 +1600,7 @@ export default function Dashboard() {
                           <div className="flex flex-col items-center gap-2 justify-center">
                             {article.status === 'new' ? (
                               (() => {
-                                const isWriting = writingIds.has(String((article as any).id ?? (article as any).title));
+                                const isWriting = writingIds.has(String((article as any).id ?? '')) || writingIds.has(String((article as any).title ?? ''));
                                 return (
                                   <button
                                     type="button"
