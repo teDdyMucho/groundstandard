@@ -108,11 +108,29 @@ export default function Dashboard() {
   const handleConfirmRewrite = async () => {
     if (!articleToRewrite) return;
     const a = articleToRewrite;
-    // Close modal immediately; row button will show loading via rewritingIds
+    // Mark as rewriting immediately so the row button shows spinner
+    const idKey = String(a.id ?? '');
+    const titleKey = String(a.title ?? '');
+    const startedAt = Date.now();
+    const prevDocLink = (a).doc_link ?? null;
+    const prevContent = (a).content ?? null;
+    setRewritingIds(prev => {
+      const next = new Set(prev);
+      if (idKey) next.add(idKey);
+      if (titleKey) next.add(titleKey);
+      return next;
+    });
+    try { setRewritingMeta(prev => ({
+      ...prev,
+      ...(idKey ? { [idKey]: { id: a.id as number | string | undefined, title: a.title, startedAt, prevDocLink, prevContent } } : {}),
+      ...(titleKey ? { [titleKey]: { id: a.id as number | string | undefined, title: a.title, startedAt, prevDocLink, prevContent } } : {}),
+    })); } catch { void 0; }
+    // Close modal right away
     setShowRewriteModal(false);
     setArticleToRewrite(null);
     const instr = rewriteInstructions.trim() || undefined;
     setRewriteInstructions('');
+    setToast('Started rewriting this article');
     await handleRewriteForArticle(a, instr);
   };
 
@@ -150,9 +168,7 @@ export default function Dashboard() {
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(optimisticRows));
-    } catch {
-      // ignore storage errors
-    }
+    } catch (e) { void e; }
   }, [optimisticRows]);
   // Auto-polling disabled to avoid auto refresh; user uses Refresh button
 
@@ -170,14 +186,28 @@ export default function Dashboard() {
   });
   // Already hydrated synchronously above; keep effects to persist changes only
   useEffect(() => {
-    try { localStorage.setItem(WRITING_STORAGE_KEY, JSON.stringify(Array.from(writingIds))); } catch {}
+    try { localStorage.setItem(WRITING_STORAGE_KEY, JSON.stringify(Array.from(writingIds))); } catch (e) { void e; }
   }, [writingIds]);
   useEffect(() => {
-    try { localStorage.setItem(REWRITING_STORAGE_KEY, JSON.stringify(Array.from(rewritingIds))); } catch {}
+    try { localStorage.setItem(REWRITING_STORAGE_KEY, JSON.stringify(Array.from(rewritingIds))); } catch (e) { void e; }
   }, [rewritingIds]);
   useEffect(() => {
-    try { localStorage.setItem(WRITING_META_KEY, JSON.stringify(writingMeta)); } catch {}
+    try { localStorage.setItem(WRITING_META_KEY, JSON.stringify(writingMeta)); } catch (e) { void e; }
   }, [writingMeta]);
+
+  // Rewriting meta (startedAt) for keeping the row spinner until completion or timeout
+  const REWRITING_META_KEY = 'gs_rewriting_meta_v1';
+  type RewritingMeta = { id?: number | string; title?: string; startedAt?: number; prevDocLink?: string | null; prevContent?: string | null };
+  const [rewritingMeta, setRewritingMeta] = useState<Record<string, RewritingMeta>>(() => {
+    try {
+      const raw = localStorage.getItem(REWRITING_META_KEY);
+      const obj = raw ? JSON.parse(raw) as Record<string, RewritingMeta> : {};
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(REWRITING_META_KEY, JSON.stringify(rewritingMeta)); } catch (e) { void e; }
+  }, [rewritingMeta]);
 
   // Prune stale writing ids (older than 2h without a matching DB row)
   useEffect(() => {
@@ -188,7 +218,7 @@ export default function Dashboard() {
     const restored = Array.from(writingIds).filter(k => !!writingMeta[k]); // only keep ids we have meta for
     const next = new Set<string>();
     for (const key of restored) {
-      const existsInDb = list.some(a => String((a as any).id ?? (a as any).title) === key);
+      const existsInDb = list.some(a => String((a).id ?? (a).title) === key);
       const meta = writingMeta[key];
       const fresh = meta && typeof meta.startedAt === 'number' && (now - meta.startedAt) <= maxAgeMs;
       if (existsInDb || fresh) next.add(key);
@@ -196,29 +226,57 @@ export default function Dashboard() {
     if (next.size !== writingIds.size) setWritingIds(next);
   }, [articles, writingIds, writingMeta]);
 
+  // Prune stale rewriting ids (older than 2h) based on startedAt
+  useEffect(() => {
+    if (rewritingIds.size === 0) return;
+    const now = Date.now();
+    const maxAgeMs = 2 * 60 * 60 * 1000;
+    const restored = Array.from(rewritingIds).filter(k => !!rewritingMeta[k]);
+    const next = new Set<string>();
+    for (const key of restored) {
+      const meta = rewritingMeta[key];
+      const fresh = meta && typeof meta.startedAt === 'number' && (now - meta.startedAt) <= maxAgeMs;
+      if (fresh) next.add(key);
+    }
+    if (next.size !== rewritingIds.size) setRewritingIds(next);
+  }, [rewritingIds, rewritingMeta]);
+
   useEffect(() => {
     if (!articles) return;
     if (writingIds.size === 0 && rewritingIds.size === 0) return;
-    let nextWriting = new Set(writingIds);
-    let nextRewriting = new Set(rewritingIds);
+    const nextWriting = new Set(writingIds);
+    const nextRewriting = new Set(rewritingIds);
     for (const a of articles) {
-      const idKey = String((a as any).id ?? '');
-      const titleKey = String((a as any).title ?? '');
-      const docLink = String((a as any).doc_link ?? '').trim();
-      const content = String((a as any).content ?? '').trim();
-      const status = String((a as any).status ?? '').trim();
+      const idKey = String((a).id ?? '');
+      const titleKey = String((a).title ?? '');
+      const docLink = String((a).doc_link ?? '').trim();
+      const content = String((a).content ?? '').trim();
+      const status = String((a).status ?? '').trim();
       const isCompleted = !!docLink || !!content || (status && status.toLowerCase() !== 'new') || docLink.toUpperCase() === 'EMPTY';
       if (isCompleted) {
         if (nextWriting.has(idKey)) { nextWriting.delete(idKey); }
         if (nextWriting.has(titleKey)) { nextWriting.delete(titleKey); }
         setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
-        if (nextRewriting.has(idKey)) { nextRewriting.delete(idKey); }
-        if (nextRewriting.has(titleKey)) { nextRewriting.delete(titleKey); }
+        // Do not auto-clear rewritingIds here; keeping spinner until backend finishes or timeout
+      }
+      // If we have a rewriting meta snapshot and either doc_link or content changed from previous, clear rewriting
+      const keys = [idKey, titleKey].filter(Boolean);
+      for (const k of keys) {
+        if (nextRewriting.has(k) && rewritingMeta[k]) {
+          const prevDoc = String(rewritingMeta[k].prevDocLink ?? '').trim();
+          const prevCon = String(rewritingMeta[k].prevContent ?? '').trim();
+          if ((prevDoc && docLink && docLink !== prevDoc) || (prevCon && content && content !== prevCon) || (!prevCon && !!content) || (!prevDoc && !!docLink)) {
+            nextRewriting.delete(k);
+            setRewritingMeta(prev => { const n = { ...prev }; delete n[k]; return n; });
+            setToast('Rewrite completed');
+            setTimeout(() => setToast(null), 3500);
+          }
+        }
       }
     }
     if (nextWriting.size !== writingIds.size) setWritingIds(nextWriting);
     if (nextRewriting.size !== rewritingIds.size) setRewritingIds(nextRewriting);
-  }, [articles, writingIds, rewritingIds]);
+  }, [articles, writingIds, rewritingIds, rewritingMeta]);
 
   // Copy full content from the View Content Modal
   const handleCopyContent = async () => {
@@ -260,8 +318,22 @@ export default function Dashboard() {
   // Send rewrite request directly to the provided webhook (optionally include instructions)
   const handleRewriteForArticle = async (article: ResearchArticle, instructions?: string) => {
     if (!article) return;
-    const key = String(article.id ?? article.title);
-    setRewritingIds(prev => new Set(prev).add(key));
+    const idKey = String(article.id ?? '');
+    const titleKey = String(article.title ?? '');
+    setRewritingIds(prev => {
+      const next = new Set(prev);
+      if (idKey) next.add(idKey);
+      if (titleKey) next.add(titleKey);
+      return next;
+    });
+    const startedAt = Date.now();
+    const prevDocLink = (article).doc_link ?? null;
+    const prevContent = (article).content ?? null;
+    setRewritingMeta(prev => ({
+      ...prev,
+      ...(idKey ? { [idKey]: { id: article.id as number | string | undefined, title: article.title, startedAt, prevDocLink, prevContent } } : {}),
+      ...(titleKey ? { [titleKey]: { id: article.id as number | string | undefined, title: article.title, startedAt, prevDocLink, prevContent } } : {}),
+    }));
     try {
       const url = '/api/rewrite';
       type RewritePayload = {
@@ -310,7 +382,25 @@ export default function Dashboard() {
       if (!ok) {
         throw new Error(`Rewrite webhook returned non-200. Last response: ${lastTxt || 'No body'}`);
       }
-      // Do not auto refresh here
+      // Kick off background refreshes to pick up the updated content
+      try { await refetch(); } catch (e) { void e; }
+      // Poll every 3s for 30s to detect the change quickly
+      const idKeyNow = String(article.id ?? '');
+      const titleKeyNow = String(article.title ?? '');
+      const poll = setInterval(() => { try { refetch(); } catch (e) { void e; } }, 3000);
+      setTimeout(() => {
+        clearInterval(poll);
+        // Fallback: after 30s, if still marked rewriting, clear it to avoid a stuck spinner
+        setRewritingIds(prev => {
+          const next = new Set(prev);
+          if (idKeyNow) next.delete(idKeyNow);
+          if (titleKeyNow) next.delete(titleKeyNow);
+          return next;
+        });
+        setRewritingMeta(prev => { const n = { ...prev }; if (idKeyNow) delete n[idKeyNow]; if (titleKeyNow) delete n[titleKeyNow]; return n; });
+        setToast('Rewrite completed');
+        setTimeout(() => setToast(null), 3500);
+      }, 30000);
     } catch (err) {
       console.error(err);
       if (err instanceof Error) {
@@ -433,8 +523,8 @@ export default function Dashboard() {
     });
     setWritingMeta(prev => ({
       ...prev,
-      ...(idKey ? { [idKey]: { id: article.id as any, title: article.title, keyword: (article as any).keyword || '', startedAt: Date.now() } } : {}),
-      ...(titleKey ? { [titleKey]: { id: article.id as any, title: article.title, keyword: (article as any).keyword || '', startedAt: Date.now() } } : {}),
+      ...(idKey ? { [idKey]: { id: article.id, title: article.title, keyword: (article).keyword || '', startedAt: Date.now() } } : {}),
+      ...(titleKey ? { [titleKey]: { id: article.id, title: article.title, keyword: (article).keyword || '', startedAt: Date.now() } } : {}),
     }));
     try {
       const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
@@ -533,16 +623,16 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
     for (const key of activeKeys) {
       const meta = writingMeta[key];
       const exists = real.some(a => (
-        String((a as any).id ?? '') === String(meta?.id ?? '') ||
-        String((a as any).title ?? '') === String(meta?.title ?? '')
+        String((a).id ?? '') === String(meta?.id ?? '') ||
+        String((a).title ?? '') === String(meta?.title ?? '')
       ));
       if (!exists && meta) {
         placeholdersFromWriting.push({
-          id: (meta.id as any) ?? key,
+          id: (meta.id) ?? key,
           title: meta.title || 'Article is processing...',
           keyword: meta.keyword || '',
-          doc_link: null as any,
-          status: 'new' as any,
+          doc_link: null,
+          status: 'new',
         } as unknown as ResearchArticle);
       }
     }
@@ -577,8 +667,8 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
 
   const toggleSelectAllOnPage = () => {
     const idsOnPage = paginatedArticles
-      .filter(a => !(a as any)._temp)
-      .map(a => (a as any).id)
+      .filter(a => !(a)._temp)
+      .map(a => (a).id)
       .filter((id) => id !== undefined && id !== null);
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -618,7 +708,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
       const { error: delError } = await supabase
         .from('Research')
         .delete()
-        .in('id', idsToDelete as any);
+        .in('id', idsToDelete);
       if (delError) throw delError;
       setSelectedIds(new Set());
       await refetch();
@@ -731,21 +821,21 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
     // Example: "H2: Upgrade the Graphics Card. For individuals..." becomes
     // "<h2>Upgrade the Graphics Card</h2> For individuals..."
     htmlForModal = htmlForModal.replace(
-      /H2:\s*(?:\d+\.\s*)?([^\.]+)\./g,
+      /H2:\s*(?:\d+\.\s*)?([^.]+)\./g,
       (_match, heading) => `<h2 style="font-size: 1.5rem; font-weight: bold;">${String(heading).trim()}</h2>`
     );
 
     // Pattern 1: phrases like "Click here https://example.com" or "Click here: https://example.com"
     // Become a proper anchor where the visible text is the URL (not the words "Click here")
     htmlForModal = htmlForModal.replace(
-      /(Click here)(?:\s*[:\-]\s*|\s+)(https?:\/\/[^\s<>"]+)/gi,
-      (_match, _label, url) => `<a href="${String(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${String(url)}<\/a>`
+      /(Click here)(?:\s*[:-]\s*|\s+)(https?:\/\/[^\s<>"]+)/gi,
+      (_match, _label, url) => `<a href="${String(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${String(url)}</a>`
     );
 
     // Normalize any anchors whose inner text is literally "Click here" to display the actual URL
     htmlForModal = htmlForModal.replace(
       /<a([^>]*?)href="([^"]+)"([^>]*)>\s*(?:Click here|click here)\s*<\/a>/g,
-      '<a$1href="$2"$3>$2<\/a>'
+      '<a$1href="$2"$3>$2</a>'
     );
 
     // Pattern 2: lines like
@@ -753,7 +843,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
     // Become a proper anchor where the URL is the href and the trailing text is the label
     htmlForModal = htmlForModal.replace(
       /(https?:\/\/[^"\s<>]+)"?>\s*([^\n<]+)/g,
-      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">$2<\/a>'
+      '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">$2</a>'
     );
 
     // Pattern 3: bare URLs with no trailing ">label
@@ -766,7 +856,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
           // Already part of an href, leave it as-is
           return match;
         }
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${url}<\/a>`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;">${url}</a>`;
       }
     );
 
@@ -779,9 +869,9 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         htmlForModal = blocks
           .map(block => {
             const lines = block.split(/\n+/).map(l => l.trim()).filter(Boolean);
-            const allBullets = lines.length > 1 && lines.every(l => /^(?:[•\-]\s+)/.test(l));
+            const allBullets = lines.length > 1 && lines.every(l => /^(?:[•-]\s+)/.test(l));
             if (allBullets) {
-              const items = lines.map(l => l.replace(/^([•\-]\s+)/, ''));
+              const items = lines.map(l => l.replace(/^([•-]\s+)/, ''));
               return `<ul>${items.map(it => `<li>${it}</li>`).join('')}</ul>`;
             }
             const single = lines.length === 1 ? lines[0] : '';
@@ -1466,8 +1556,8 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <input
                           type="checkbox"
                           checked={paginatedArticles
-                            .filter(a => !(a as any)._temp)
-                            .every(a => selectedIds.has((a as any).id)) && paginatedArticles.filter(a => !(a as any)._temp).length > 0}
+                            .filter(a => !(a)._temp)
+                            .every(a => selectedIds.has((a).id)) && paginatedArticles.filter(a => !(a)._temp).length > 0}
                           onChange={toggleSelectAllOnPage}
                         />
                       )}
@@ -1513,18 +1603,18 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
                 {paginatedArticles.map((article: (ResearchArticle & { _temp?: false; createdTs?: number }) | OptimisticArticle, index) => {
-                  const idKey = String((article as any).id ?? '');
-                  const titleKey = String((article as any).title ?? '');
+                  const idKey = String((article).id ?? '');
+                  const titleKey = String((article).title ?? '');
                   const isRewriting = rewritingIds.has(idKey) || rewritingIds.has(titleKey);
                   const isWritingRow = writingIds.has(idKey) || writingIds.has(titleKey);
                   return (
                   <tr key={`${article.id}`} className={`hover:bg-blue-50/50 transition-all duration-300 group border-l-4 ${isWritingRow ? 'border-blue-500 ring-2 ring-blue-300/60' : 'border-transparent hover:border-blue-500'} ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
                     <td className="px-4 py-6 text-center">
-                      {!(article as any)._temp && (
+                      {!(article)._temp && (
                         <input
                           type="checkbox"
-                          checked={selectedIds.has((article as any).id)}
-                          onChange={() => toggleSelectOne((article as any).id)}
+                          checked={selectedIds.has((article).id)}
+                          onChange={() => toggleSelectOne((article).id)}
                         />
                       )}
                     </td>
@@ -1592,7 +1682,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         </div>
                       ) : (
                         <div className="break-all">
-                          {renderDocLink((article as any).doc_link)}
+                          {renderDocLink((article).doc_link)}
                         </div>
                       )}
                     </td>
@@ -1617,7 +1707,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         </div>
                       ) : (
                         <div className="flex items-center justify-center">
-                          {renderContentLink((article as any).title, (article as any).content)}
+                          {renderContentLink((article).title, (article).content)}
                         </div>
                       )}
                     </td>
@@ -1632,7 +1722,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                           <div className="flex flex-col items-center gap-2 justify-center">
                             {article.status === 'new' ? (
                               (() => {
-                                const isWriting = writingIds.has(String((article as any).id ?? '')) || writingIds.has(String((article as any).title ?? ''));
+                                const isWriting = writingIds.has(String((article).id ?? '')) || writingIds.has(String((article).title ?? ''));
                                 return (
                                   <button
                                     type="button"
@@ -1667,18 +1757,18 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                               )
                             ) : (
                               <div className="flex items-center justify-center">
-                                {getStatusBadge((article as any).status)}
+                                {getStatusBadge((article).status)}
                               </div>
                             )}
                             {/* Delete button for any non-temp row */}
                             <button
                               type="button"
-                              onClick={() => handleDeleteArticle((article as any).id, (article as any).title)}
-                              disabled={deletingIds.has((article as any).id)}
+                              onClick={() => handleDeleteArticle((article).id, (article).title)}
+                              disabled={deletingIds.has((article).id)}
                               className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50"
                               title="Delete"
                             >
-                              {deletingIds.has((article as any).id) ? (
+                              {deletingIds.has((article).id) ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                               ) : (
                                 <Trash className="w-4 h-4" />
