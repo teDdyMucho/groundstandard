@@ -66,7 +66,6 @@ export default function Dashboard() {
   const [showRewriteModal, setShowRewriteModal] = useState(false);
   const [articleToRewrite, setArticleToRewrite] = useState<ResearchArticle | null>(null);
   const [rewriteInstructions, setRewriteInstructions] = useState<string>('');
-  const [rewriteSubmitting, setRewriteSubmitting] = useState<boolean>(false);
   // Optional instructions for Write
   const [writeInstructions, setWriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
@@ -109,15 +108,12 @@ export default function Dashboard() {
   const handleConfirmRewrite = async () => {
     if (!articleToRewrite) return;
     const a = articleToRewrite;
-    setRewriteSubmitting(true);
-    try {
-      await handleRewriteForArticle(a, rewriteInstructions.trim() || undefined);
-    } finally {
-      setRewriteSubmitting(false);
-      setShowRewriteModal(false);
-      setArticleToRewrite(null);
-      setRewriteInstructions('');
-    }
+    // Close modal immediately; row button will show loading via rewritingIds
+    setShowRewriteModal(false);
+    setArticleToRewrite(null);
+    const instr = rewriteInstructions.trim() || undefined;
+    setRewriteInstructions('');
+    await handleRewriteForArticle(a, instr);
   };
 
   // Optimistic placeholder rows inserted immediately after sending a keyword
@@ -1069,15 +1065,14 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => { if (rewriteSubmitting) return; setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+            onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
           />
           <div className="relative bg-white w-full max-w-lg mx-auto rounded-lg shadow-lg border p-6 z-10">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Rewrite Article</h3>
               <button
-                onClick={() => { if (rewriteSubmitting) return; setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
-                className="p-2 rounded hover:bg-gray-100 text-gray-600 disabled:opacity-50"
-                disabled={rewriteSubmitting}
+                onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+                className="p-2 rounded hover:bg-gray-100 text-gray-600"
                 aria-label="Close"
               >
                 <X className="w-5 h-5" />
@@ -1100,20 +1095,17 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => { if (rewriteSubmitting) return; setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
-                  disabled={rewriteSubmitting}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => { setShowRewriteModal(false); setArticleToRewrite(null); setRewriteInstructions(''); }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmRewrite}
-                  disabled={rewriteSubmitting}
-                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700"
                 >
-                  {rewriteSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                  {rewriteSubmitting ? 'Rewriting…' : 'Rewrite'}
+                  Rewrite
                 </button>
               </div>
             </div>
