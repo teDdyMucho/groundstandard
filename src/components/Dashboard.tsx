@@ -1585,7 +1585,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <Eye className="w-4 h-4 text-white" />
                         </div>
-                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Website</span>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Business</span>
                       </div>
                     </th>
                     <th className="w-[12%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
@@ -1677,14 +1677,12 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                       ) : (
                         <div className="break-all">
                           {(() => {
-                            const site = (article as ResearchArticle).website as string | null | undefined;
-                            const url = (site || '').trim();
-                            return url ? (
-                              <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">
-                                {url}
-                              </a>
+                            const biz = (article as ResearchArticle).business_name as string | null | undefined;
+                            const name = (biz || '').trim();
+                            return name ? (
+                              <span className="text-gray-900 text-sm font-medium">{name}</span>
                             ) : (
-                              <span className="text-gray-500 text-sm italic">No website attached</span>
+                              <span className="text-gray-500 text-sm italic">No business name</span>
                             );
                           })()}
                         </div>

@@ -17,5 +17,7 @@ export interface ResearchArticle {
   content?: string | null;
   // Optional website field stored in the Research table
   website?: string | null;
+  // Optional business name associated with the research row
+  business_name?: string | null;
   status: string;
 }
