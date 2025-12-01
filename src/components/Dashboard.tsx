@@ -1246,7 +1246,17 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                     type="text"
                     value={newKeyword}
                     onChange={(e) => setNewKeyword(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddKeyword(); } }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddKeyword();
+                      } else if (e.key === 'Backspace' && !newKeyword.trim() && extraKeywords.length > 0) {
+                        // Remove the last keyword when input is empty
+                        e.preventDefault();
+                        const last = extraKeywords[extraKeywords.length - 1];
+                        handleRemoveKeyword(last);
+                      }
+                    }}
                     placeholder="Enter keyword"
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                   />
@@ -1271,7 +1281,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                           className="text-gray-500 hover:text-gray-700"
                           aria-label="Remove"
                         >
-                          
+                          <X className="w-3 h-3" />
                         </button>
                       </span>
                     ))}
@@ -1562,7 +1572,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         />
                       )}
                     </th>
-                    <th className="w-[33%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[28%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <FileText className="w-4 h-4 text-white" />
@@ -1573,12 +1583,20 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                     <th className="w-[14%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
+                          <Eye className="w-4 h-4 text-white" />
+                        </div>
+                        <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Website</span>
+                      </div>
+                    </th>
+                    <th className="w-[12%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                      <div className="flex items-center gap-3 group">
+                        <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <Search className="w-4 h-4 text-white" />
                         </div>
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Keyword</span>
                       </div>
                     </th>
-                    <th className="w-[24%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[20%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <Eye className="w-4 h-4 text-white" />
@@ -1586,7 +1604,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Document Link</span>
                       </div>
                     </th>
-                    <th className="w-[15%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[12%] px-8 py-6 text-left text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center gap-3 group">
                         <div className="w-8 h-8 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-200">
                           <FileText className="w-4 h-4 text-white" />
@@ -1594,7 +1612,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <span className="bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">Content</span>
                       </div>
                     </th>
-                    <th className="w-[11%] px-8 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
+                    <th className="w-[10%] px-8 py-6 text-center text-sm font-black text-gray-800 uppercase tracking-wider">
                       <div className="flex items-center justify-center">
                         <span className="bg-gradient-to-r from-red-600 to-red-800 bg-clip-text text-transparent">Actions</span>
                       </div>
@@ -1647,6 +1665,28 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                           <div className="text-xs text-gray-500 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                             Click to view details
                           </div>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-8 py-6">
+                      {article._temp ? (
+                        <div className="space-y-3">
+                          <div className="w-full h-5 bg-gray-200 rounded-lg animate-pulse" />
+                          <div className="w-4/5 h-4 bg-gray-200 rounded-lg animate-pulse" />
+                        </div>
+                      ) : (
+                        <div className="break-all">
+                          {(() => {
+                            const site = (article as ResearchArticle).website as string | null | undefined;
+                            const url = (site || '').trim();
+                            return url ? (
+                              <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline break-all">
+                                {url}
+                              </a>
+                            ) : (
+                              <span className="text-gray-500 text-sm italic">No website attached</span>
+                            );
+                          })()}
                         </div>
                       )}
                     </td>

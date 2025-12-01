@@ -15,5 +15,7 @@ export interface ResearchArticle {
   // Optional content field coming from the Research table.
   // It may be null or an empty string when content hasn't been generated yet.
   content?: string | null;
+  // Optional website field stored in the Research table
+  website?: string | null;
   status: string;
 }
