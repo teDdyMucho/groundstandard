@@ -209,6 +209,22 @@ export default function Dashboard() {
     try { localStorage.setItem(REWRITING_META_KEY, JSON.stringify(rewritingMeta)); } catch (e) { void e; }
   }, [rewritingMeta]);
 
+  // Per-row tags persisted locally
+  const TAGS_STORAGE_KEY = 'gs_article_tags_v1';
+  const [tagsById, setTagsById] = useState<Record<string, string[]>>(() => {
+    try {
+      const raw = localStorage.getItem(TAGS_STORAGE_KEY);
+      const obj = raw ? JSON.parse(raw) as Record<string, string[]> : {};
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tagsById)); } catch (e) { void e; }
+  }, [tagsById]);
+
+  const [tagEditorKey, setTagEditorKey] = useState<string | null>(null);
+  const [tagEditorValue, setTagEditorValue] = useState<string>('');
+
   // Prune stale writing ids (older than 2h without a matching DB row)
   useEffect(() => {
     if (writingIds.size === 0) return;
@@ -558,6 +574,42 @@ export default function Dashboard() {
       });
       setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
     }
+  };
+
+  // Tag helpers
+  const openTagEditor = (key: string) => {
+    const safeKey = String(key || '').trim();
+    if (!safeKey) return;
+    setTagEditorKey(safeKey);
+    setTagEditorValue('');
+  };
+
+  const confirmTagEditor = () => {
+    const safeKey = String(tagEditorKey || '').trim();
+    const tag = String(tagEditorValue || '').trim();
+    if (!safeKey || !tag) return;
+    setTagsById(prev => {
+      const cur = Array.isArray(prev[safeKey]) ? prev[safeKey] : [];
+      if (cur.includes(tag)) return prev;
+      return { ...prev, [safeKey]: [...cur, tag] };
+    });
+    setTagEditorKey(null);
+    setTagEditorValue('');
+  };
+
+  const cancelTagEditor = () => {
+    setTagEditorKey(null);
+    setTagEditorValue('');
+  };
+
+  const handleRemoveTag = (key: string, tag: string) => {
+    const safeKey = String(key || '').trim();
+    if (!safeKey) return;
+    setTagsById(prev => {
+      const cur = Array.isArray(prev[safeKey]) ? prev[safeKey] : [];
+      const next = cur.filter(t => t !== tag);
+      return { ...prev, [safeKey]: next };
+    });
   };
 
 // Delete an article by id from Supabase
@@ -1661,6 +1713,61 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <div className="group cursor-pointer">
                           <div className="font-bold text-black text-base group-hover:text-blue-600 transition-colors duration-200 line-clamp-3 leading-relaxed">
                             {article.title}
+                          </div>
+                          {/* Tags display */}
+                          <div className="mt-2">
+                            {(tagsById[idKey || titleKey] || []).length > 0 && (
+                              <div className="flex flex-wrap gap-2 mb-2">
+                                {(tagsById[idKey || titleKey] || []).map((t) => (
+                                  <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                                    {t}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleRemoveTag(idKey || titleKey, t); }}
+                                      className="ml-1 text-blue-700 hover:text-red-600"
+                                      title="Remove tag"
+                                    >
+                                      <X className="w-3 h-3" />
+                                    </button>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {tagEditorKey === (idKey || titleKey) ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={tagEditorValue}
+                                  onChange={(e) => setTagEditorValue(e.target.value)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  placeholder="Enter tag"
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); confirmTagEditor(); }}
+                                  className="px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+                                >
+                                  Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); cancelTagEditor(); }}
+                                  className="px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); openTagEditor(idKey || titleKey); }}
+                                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                              >
+                                +tag
+                              </button>
+                            )}
                           </div>
                           <div className="text-xs text-gray-500 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                             Click to view details
