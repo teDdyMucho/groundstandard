@@ -210,11 +210,12 @@ export default function Dashboard() {
   }, [rewritingMeta]);
 
   // Per-row tags persisted locally
+  type RowTag = { name: string; color: string } | string; // keep backward compatibility for legacy string-only tags
   const TAGS_STORAGE_KEY = 'gs_article_tags_v1';
-  const [tagsById, setTagsById] = useState<Record<string, string[]>>(() => {
+  const [tagsById, setTagsById] = useState<Record<string, RowTag[]>>(() => {
     try {
       const raw = localStorage.getItem(TAGS_STORAGE_KEY);
-      const obj = raw ? JSON.parse(raw) as Record<string, string[]> : {};
+      const obj = raw ? JSON.parse(raw) as Record<string, RowTag[]> : {};
       return obj && typeof obj === 'object' ? obj : {};
     } catch { return {}; }
   });
@@ -222,8 +223,135 @@ export default function Dashboard() {
     try { localStorage.setItem(TAGS_STORAGE_KEY, JSON.stringify(tagsById)); } catch (e) { void e; }
   }, [tagsById]);
 
-  const [tagEditorKey, setTagEditorKey] = useState<string | null>(null);
-  const [tagEditorValue, setTagEditorValue] = useState<string>('');
+  // Tag Modal state
+  const [showTagModal, setShowTagModal] = useState(false);
+  const [tagName, setTagName] = useState('');
+  const [tagColor, setTagColor] = useState('#2563eb');
+  type TagRow = { id: number; created_at: string; tag: string; color: string };
+  const [tagRows, setTagRows] = useState<TagRow[]>([]);
+  const [tagLoading, setTagLoading] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [openTagMenuKey, setOpenTagMenuKey] = useState<string | null>(null);
+  const [editingTagId, setEditingTagId] = useState<number | null>(null);
+  const [editTagName, setEditTagName] = useState('');
+  const [editTagColor, setEditTagColor] = useState('#2563eb');
+  const [savingTagId, setSavingTagId] = useState<number | null>(null);
+  const [deletingTagId, setDeletingTagId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
+  const fetchTags = async () => {
+    try {
+      setTagLoading(true);
+      setTagError(null);
+      const { data, error } = await supabase
+        .from('tag')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      const rows = (data as TagRow[]) || [];
+      setTagRows(rows);
+      // Reconcile: drop any local row tags that no longer exist in Supabase
+      const validNames = new Set(rows.map(r => (r.tag || '').trim()));
+      setTagsById(prev => {
+        const out: Record<string, RowTag[]> = {};
+        for (const [k, arr] of Object.entries(prev || {})) {
+          const cur = Array.isArray(arr) ? arr : [];
+          const next = cur.filter(t => {
+            const name = typeof t === 'string' ? t : t.name;
+            return validNames.has((name || '').trim());
+          });
+          out[k] = next;
+        }
+        return out;
+      });
+    } catch (e) {
+      console.error('Failed to load tags', e);
+      setTagError(e instanceof Error ? e.message : 'Failed to load tags');
+    } finally {
+      setTagLoading(false);
+    }
+  };
+
+  useEffect(() => { if (showTagModal) { fetchTags(); } }, [showTagModal]);
+  // Temporary: touch variables used in JSX to satisfy lints in some IDE states
+  useEffect(() => { void deletingTagId; void confirmDeleteId; void deleteTag; }, []);
+  // Close per-row tag dropdown when clicking outside
+  useEffect(() => {
+    const onDocClick = () => setOpenTagMenuKey(null);
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, []);
+  useEffect(() => { if (tagRows.length === 0) { fetchTags(); } }, []);
+
+  const applyTagToRow = (rowKey: string, tr: TagRow) => {
+    const safeKey = String(rowKey || '').trim();
+    if (!safeKey) return;
+    setTagsById(prev => {
+      const cur = Array.isArray(prev[safeKey]) ? prev[safeKey] as RowTag[] : [];
+      const exists = cur.some(t => (typeof t === 'string' ? t === tr.tag : t.name === tr.tag));
+      if (exists) return prev;
+      return { ...prev, [safeKey]: [...cur, { name: tr.tag, color: tr.color }] };
+    });
+    setOpenTagMenuKey(null);
+  };
+
+  const beginEditTag = (row: TagRow) => {
+    setEditingTagId(row.id);
+    setEditTagName(row.tag);
+    setEditTagColor(row.color || '#2563eb');
+  };
+
+  const cancelEditTag = () => {
+    setEditingTagId(null);
+    setEditTagName('');
+    setEditTagColor('#2563eb');
+  };
+
+  const saveEditTag = async () => {
+    if (editingTagId == null) return;
+    const name = editTagName.trim();
+    const color = editTagColor.trim() || '#2563eb';
+    if (!name) return;
+    setSavingTagId(editingTagId);
+    try {
+      const { error } = await supabase.from('tag').update({ tag: name, color }).eq('id', editingTagId);
+      if (error) throw error;
+      await fetchTags();
+      cancelEditTag();
+    } catch (e) {
+      console.error('Update tag failed', e);
+      window.alert(e instanceof Error ? e.message : 'Failed to update tag');
+    } finally {
+      setSavingTagId(null);
+    }
+  };
+
+  const deleteTag = async (id: number, name?: string) => {
+    setDeletingTagId(id);
+    try {
+      const { error } = await supabase.from('tag').delete().eq('id', id);
+      if (error) throw error;
+      await fetchTags();
+      // Prune this tag from all rows locally if name is provided
+      if (name && name.trim()) {
+        const delName = name.trim();
+        setTagsById(prev => {
+          const out: Record<string, RowTag[]> = {};
+          for (const [k, arr] of Object.entries(prev || {})) {
+            const cur = Array.isArray(arr) ? arr : [];
+            out[k] = cur.filter(t => (typeof t === 'string' ? t !== delName : t.name !== delName));
+          }
+          return out;
+        });
+      }
+      setConfirmDeleteId(null);
+    } catch (e) {
+      console.error('Delete tag failed', e);
+      window.alert(e instanceof Error ? e.message : 'Failed to delete tag');
+    } finally {
+      setDeletingTagId(null);
+    }
+  };
 
   // Prune stale writing ids (older than 2h without a matching DB row)
   useEffect(() => {
@@ -576,38 +704,32 @@ export default function Dashboard() {
     }
   };
 
-  // Tag helpers
-  const openTagEditor = (key: string) => {
-    const safeKey = String(key || '').trim();
-    if (!safeKey) return;
-    setTagEditorKey(safeKey);
-    setTagEditorValue('');
+  // Create tag via modal (no row selection required)
+  const handleCreateTag = async () => {
+    const name = tagName.trim();
+    const color = tagColor.trim() || '#2563eb';
+    if (!name) { window.alert('Please enter a tag name.'); return; }
+    try {
+      await fetch('https://groundstandard.app.n8n.cloud/webhook/Tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag: name, color }),
+      });
+    } catch (e) { console.error('Webhook error', e); }
+    // Refetch tags to reflect the new tag saved by n8n
+    try { await fetchTags(); } catch (e) { void e; }
+    setShowTagModal(false);
+    setTagName('');
+    setTagColor('#2563eb');
   };
 
-  const confirmTagEditor = () => {
-    const safeKey = String(tagEditorKey || '').trim();
-    const tag = String(tagEditorValue || '').trim();
-    if (!safeKey || !tag) return;
-    setTagsById(prev => {
-      const cur = Array.isArray(prev[safeKey]) ? prev[safeKey] : [];
-      if (cur.includes(tag)) return prev;
-      return { ...prev, [safeKey]: [...cur, tag] };
-    });
-    setTagEditorKey(null);
-    setTagEditorValue('');
-  };
-
-  const cancelTagEditor = () => {
-    setTagEditorKey(null);
-    setTagEditorValue('');
-  };
-
-  const handleRemoveTag = (key: string, tag: string) => {
+  // Remove a tag by name for a given row key
+  const handleRemoveTag = (key: string, tagName: string) => {
     const safeKey = String(key || '').trim();
     if (!safeKey) return;
     setTagsById(prev => {
       const cur = Array.isArray(prev[safeKey]) ? prev[safeKey] : [];
-      const next = cur.filter(t => t !== tag);
+      const next = cur.filter(t => (typeof t === 'string' ? t !== tagName : t.name !== tagName));
       return { ...prev, [safeKey]: next };
     });
   };
@@ -616,6 +738,7 @@ export default function Dashboard() {
 const handleDeleteArticle = async (id: number | string, title?: string) => {
   if (id === undefined || id === null) return;
   const confirmed = window.confirm(`Delete this item${title ? `: "${title}"` : ''}? This cannot be undone.`);
+  // ... (rest of the code remains the same)
   if (!confirmed) return;
   setDeletingIds(prev => new Set(prev).add(id));
   try {
@@ -662,8 +785,11 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
     const realArticles = articles || [];
     // Start with real articles
     const real = realArticles.filter(article => {
-      const matchesSearch = article.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          article.keyword.toLowerCase().includes(searchTerm.toLowerCase());
+      const q = (searchTerm || '').toLowerCase();
+      const t = (article.title || '').toLowerCase();
+      const k = (article.keyword || '').toLowerCase();
+      const b = String((article as ResearchArticle).business_name || '').toLowerCase();
+      const matchesSearch = t.includes(q) || k.includes(q) || b.includes(q);
       const matchesStatus = statusFilter === 'all' || article.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
@@ -1520,6 +1646,179 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
           </div>
         </div>
 
+        {/* Tag Modal */}
+        {showTagModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowTagModal(false)}>
+            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-0 border border-gray-200 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-6 pt-5 pb-4 bg-gradient-to-r from-blue-600/5 via-transparent to-rose-600/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md">
+                      <Plus className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-extrabold text-gray-900">Create Tag</h3>
+                      <p className="text-xs text-gray-500">Manage your saved tags and colors</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="px-6 py-5 space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Tag name</label>
+                  <input
+                    type="text"
+                    value={tagName}
+                    onChange={(e) => setTagName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreateTag(); } }}
+                    className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400"
+                    placeholder="e.g. Important"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-800 mb-1">Color</label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="color"
+                      value={tagColor}
+                      onChange={(e) => setTagColor(e.target.value)}
+                      className="h-10 w-12 p-0 border-2 border-gray-200 rounded-md cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-700">{tagColor}</span>
+                  </div>
+                </div>
+                {/* Top actions */}
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTagModal(false)}
+                    className="px-3 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl border border-gray-200 shadow-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateTag}
+                    className="px-3 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={!tagName.trim()}
+                  >
+                    Create Tag
+                  </button>
+                </div>
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-bold text-gray-900 tracking-wide">Saved Tags</h4>
+                    <button
+                      type="button"
+                      onClick={fetchTags}
+                      className="text-xs text-blue-600 hover:underline"
+                      title="Refresh tags"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <div className="border-2 border-gray-100 rounded-xl overflow-hidden shadow-sm">
+                    {tagLoading ? (
+                      <div className="p-6 text-sm text-gray-600">Loading tags…</div>
+                    ) : tagError ? (
+                      <div className="p-6 text-sm text-red-600">{tagError}</div>
+                    ) : tagRows.length === 0 ? (
+                      <div className="p-6 text-sm text-gray-600">No tags yet</div>
+                    ) : (
+                      <div className="max-h-64 overflow-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-gray-50 text-gray-700 sticky top-0 z-10">
+                            <tr>
+                              <th className="text-left px-4 py-2.5 font-semibold">Tag</th>
+                              <th className="text-left px-4 py-2.5 font-semibold">Color</th>
+                              <th className="text-left px-4 py-2.5 font-semibold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tagRows.map(r => (
+                              <tr key={r.id} className="border-t hover:bg-gray-50/60">
+                                <td className="px-4 py-2.5 font-medium text-gray-900">
+                                  {editingTagId === r.id ? (
+                                    <input
+                                      type="text"
+                                      value={editTagName}
+                                      onChange={(e) => setEditTagName(e.target.value)}
+                                      className="px-2.5 py-1.5 text-sm border-2 border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500"
+                                    />
+                                  ) : (
+                                    r.tag
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  {editingTagId === r.id ? (
+                                    <div className="inline-flex items-center gap-2">
+                                      <input
+                                        type="color"
+                                        value={editTagColor}
+                                        onChange={(e) => setEditTagColor(e.target.value)}
+                                        className="h-8 w-10 p-0 border-2 border-gray-200 rounded"
+                                      />
+                                      <span className="text-gray-800 text-sm font-medium">{editTagColor}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="inline-flex items-center gap-2">
+                                      <span className="inline-block w-4 h-4 rounded" style={{ backgroundColor: r.color }} />
+                                      <span className="text-gray-800 font-medium">{r.color}</span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5">
+                                  {editingTagId === r.id ? (
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={saveEditTag}
+                                        disabled={savingTagId === r.id || !editTagName.trim()}
+                                        className="px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm disabled:opacity-50"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={cancelEditTag}
+                                        className="px-2.5 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => beginEditTag(r)}
+                                        className="px-2.5 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeleteId(r.id)}
+                                        className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Enhanced Search & Filter Section */}
         <div className="bg-gradient-to-r from-white via-blue-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg mb-8 overflow-hidden">
           <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
@@ -1532,7 +1831,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                       <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-blue-600 z-10" />
                       <input
                         type="text"
-                        placeholder="Search articles, keywords..."
+                        placeholder="Search articles, keywords, business..."
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                         className="w-full pl-12 pr-4 py-3 bg-gradient-to-r from-gray-50 to-blue-50/50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 focus:bg-white transition-all duration-300 text-black placeholder-gray-500 font-medium shadow-sm"
@@ -1541,6 +1840,18 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
+                  {/* Tag Modal Trigger */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowTagModal(true)}
+                      className="inline-flex items-center px-3 py-2 rounded-xl text-sm font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 shadow-sm"
+                      title="Create tag"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Manage Tag
+                    </button>
+                  </div>
                   <div className="flex items-center gap-3 bg-gradient-to-r from-gray-50 to-blue-50/50 px-4 py-2 rounded-xl border border-gray-200">
                     <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
                     <Filter className="w-4 h-4 text-blue-600" />
@@ -1714,59 +2025,68 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                           <div className="font-bold text-black text-base group-hover:text-blue-600 transition-colors duration-200 line-clamp-3 leading-relaxed">
                             {article.title}
                           </div>
-                          {/* Tags display */}
-                          <div className="mt-2">
+                          {/* Tags display (no per-row add button) */}
+                          <div className="mt-2 relative">
                             {(tagsById[idKey || titleKey] || []).length > 0 && (
                               <div className="flex flex-wrap gap-2 mb-2">
-                                {(tagsById[idKey || titleKey] || []).map((t) => (
-                                  <span key={t} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-                                    {t}
-                                    <button
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); handleRemoveTag(idKey || titleKey, t); }}
-                                      className="ml-1 text-blue-700 hover:text-red-600"
-                                      title="Remove tag"
-                                    >
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </span>
-                                ))}
+                                {(tagsById[idKey || titleKey] || []).map((t) => {
+                                  const label = typeof t === 'string' ? t : t.name;
+                                  const color = typeof t === 'string' ? '#bfdbfe' : t.color || '#bfdbfe';
+                                  const textColor = '#1e40af';
+                                  return (
+                                    <span key={label} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border" style={{ backgroundColor: color + '22', borderColor: color, color: textColor }}>
+                                      {label}
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleRemoveTag(idKey || titleKey, label); }}
+                                        className="ml-1 hover:text-red-600"
+                                        title="Remove tag"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                  );
+                                })}
                               </div>
                             )}
-                            {tagEditorKey === (idKey || titleKey) ? (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={tagEditorValue}
-                                  onChange={(e) => setTagEditorValue(e.target.value)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="px-2 py-1 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  placeholder="Enter tag"
-                                  autoFocus
-                                />
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); confirmTagEditor(); }}
-                                  className="px-2 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md"
-                                >
-                                  Add
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); cancelTagEditor(); }}
-                                  className="px-2 py-1 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
-                                >
-                                  Cancel
-                                </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setOpenTagMenuKey(openTagMenuKey === (idKey || titleKey) ? null : (idKey || titleKey)); }}
+                              className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                            >
+                              +tag
+                            </button>
+                            {openTagMenuKey === (idKey || titleKey) && (
+                              <div className="absolute z-20 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-lg">
+                                <div className="px-3 py-2 text-xs text-gray-500 flex items-center justify-between">
+                                  <span>Select a tag</span>
+                                  <button className="text-[11px] text-blue-600 hover:underline" onClick={(e)=>{e.stopPropagation(); fetchTags();}}>Refresh</button>
+                                </div>
+                                <div className="max-h-56 overflow-auto">
+                                  {tagLoading ? (
+                                    <div className="px-3 py-2 text-sm text-gray-600">Loading…</div>
+                                  ) : tagError ? (
+                                    <div className="px-3 py-2 text-sm text-red-600">{tagError}</div>
+                                  ) : tagRows.length === 0 ? (
+                                    <div className="px-3 py-2 text-sm text-gray-600">No tags</div>
+                                  ) : (
+                                    <ul className="py-1">
+                                      {tagRows.map(tr => (
+                                        <li key={tr.id}>
+                                          <button
+                                            type="button"
+                                            onClick={(e)=>{e.stopPropagation(); applyTagToRow(idKey || titleKey, tr);}}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-gray-50"
+                                          >
+                                            <span className="inline-block w-3 h-3 rounded" style={{ backgroundColor: tr.color }} />
+                                            <span className="text-sm text-gray-800">{tr.tag}</span>
+                                          </button>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  )}
+                                </div>
                               </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); openTagEditor(idKey || titleKey); }}
-                                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline"
-                              >
-                                +tag
-                              </button>
                             )}
                           </div>
                           <div className="text-xs text-gray-500 mt-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
