@@ -68,84 +68,50 @@ export default function Dashboard() {
   const [rewriteInstructions, setRewriteInstructions] = useState<string>('');
   const rewriteModelOptions = useMemo(() => (
     [
-      'openai/gpt-5.2-instant',
-      'openai/gpt-5.2-thinking',
-      'openai/gpt-5.2-pro',
-      'openai/gpt-4.1',
-      'openai/gpt-4.1-mini',
-      'openai/gpt-4o',
       'openai/gpt-4o-mini',
+      'openai/gpt-4o',
+      'openai/gpt-4.1-mini',
+      'openai/gpt-4.1',
 
-      'anthropic/claude-3-haiku',
-      'anthropic/claude-3-opus',
-      'anthropic/claude-3.5-haiku',
-      'anthropic/claude-3.5-haiku-20241022',
-      'anthropic/claude-3.5-sonnet',
       'anthropic/claude-3.7-sonnet',
-      'anthropic/claude-3.7-sonnet:thinking',
-      'anthropic/claude-haiku-4.5',
+      'anthropic/claude-3.5-sonnet',
+      'anthropic/claude-3.5-haiku',
+      'anthropic/claude-3-haiku',
       'anthropic/claude-sonnet-4',
-      'anthropic/claude-sonnet-4.5',
-      'anthropic/claude-opus-4',
-      'anthropic/claude-opus-4.1',
-      'anthropic/claude-opus-4.5',
 
-      'google/gemini-2.0-flash-001',
-      'google/gemini-2.0-flash-exp:free',
-      'google/gemini-2.0-flash-lite-001',
       'google/gemini-2.5-flash',
-      'google/gemini-2.5-flash-image',
-      'google/gemini-2.5-flash-image-preview',
       'google/gemini-2.5-flash-lite',
-      'google/gemini-2.5-flash-lite-preview-09-2025',
-      'google/gemini-2.5-flash-preview-09-2025',
-      'google/gemini-2.5-pro',
-      'google/gemini-2.5-pro-preview',
-      'google/gemini-2.5-pro-preview-05-06',
-      'google/gemini-3-flash-preview',
-      'google/gemini-3-pro-preview',
-      'google/gemini-3-pro-image-preview',
+      'google/gemini-2.0-flash-001',
+      'google/gemini-2.0-flash-lite-001',
 
-      'x-ai/grok-3',
-      'x-ai/grok-3-beta',
       'x-ai/grok-3-mini',
       'x-ai/grok-3-mini-beta',
-      'x-ai/grok-4',
-      'x-ai/grok-4-fast',
-      'x-ai/grok-4.1-fast',
-      'x-ai/grok-code-fast-1',
 
-      'meta-llama/llama-3.1-70b-instruct',
       'meta-llama/llama-3.1-8b-instruct',
-      'meta-llama/llama-3-70b-instruct',
+      'meta-llama/llama-3.1-70b-instruct',
       'meta-llama/llama-3-8b-instruct',
-      'meta-llama/llama-4-scout',
-      'meta-llama/llama-4-maverick',
+      'meta-llama/llama-3-70b-instruct',
 
       'mistralai/mistral-large',
-      'mistralai/mistral-large-latest',
       'mistralai/mixtral-8x7b-instruct',
-      'mistralai/mixtral-8x22b-instruct',
 
       'amazon/nova-lite-v1',
       'amazon/nova-micro-v1',
 
-      'allenai/olmo-3-32b-think:free',
       'allenai/olmo-2-0325-32b-instruct',
+      'allenai/olmo-3-32b-think:free',
 
-      'alpindale/goliath-120b',
       'deepseek/v3',
-      'zephyr/v1',
-      'toppy/v1',
     ]
   ), []);
-  const [rewriteModel, setRewriteModel] = useState<string>(rewriteModelOptions[0] || '');
+  const defaultModel = useMemo(() => 'anthropic/claude-sonnet-4', []);
+  const [rewriteModel, setRewriteModel] = useState<string>(defaultModel);
   const [rewriteModelOpen, setRewriteModelOpen] = useState(false);
   const [rewriteModelQuery, setRewriteModelQuery] = useState('');
   const rewriteModelDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const writeModelOptions = rewriteModelOptions;
-  const [writeModel, setWriteModel] = useState<string>(writeModelOptions[0] || '');
+  const [writeModel, setWriteModel] = useState<string>(defaultModel);
   const [writeModelOpen, setWriteModelOpen] = useState(false);
   const [writeModelQuery, setWriteModelQuery] = useState('');
   const writeModelDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -184,7 +150,7 @@ export default function Dashboard() {
   const handleOpenRewriteModal = (article: ResearchArticle) => {
     setArticleToRewrite(article);
     setRewriteInstructions('');
-    setRewriteModel(rewriteModelOptions[0] || '');
+    setRewriteModel(defaultModel);
     setRewriteModelQuery('');
     setRewriteModelOpen(false);
     setShowRewriteModal(true);
@@ -748,7 +714,7 @@ export default function Dashboard() {
     setNewKeyword('');
     setWriteInstructions('');
     setWebsite('');
-    setWriteModel(writeModelOptions[0] || '');
+    setWriteModel(defaultModel);
     setWriteModelQuery('');
     setWriteModelOpen(false);
     setShowWriteModal(true);
