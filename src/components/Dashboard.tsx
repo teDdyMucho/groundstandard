@@ -143,6 +143,12 @@ export default function Dashboard() {
   const [rewriteModelOpen, setRewriteModelOpen] = useState(false);
   const [rewriteModelQuery, setRewriteModelQuery] = useState('');
   const rewriteModelDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  const writeModelOptions = rewriteModelOptions;
+  const [writeModel, setWriteModel] = useState<string>(writeModelOptions[0] || '');
+  const [writeModelOpen, setWriteModelOpen] = useState(false);
+  const [writeModelQuery, setWriteModelQuery] = useState('');
+  const writeModelDropdownRef = useRef<HTMLDivElement | null>(null);
   // Optional instructions for Write
   const [writeInstructions, setWriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
@@ -195,6 +201,18 @@ export default function Dashboard() {
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
   }, [rewriteModelOpen]);
+
+  useEffect(() => {
+    if (!writeModelOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = writeModelDropdownRef.current;
+      const target = e.target as Node | null;
+      if (!el || !target) return;
+      if (!el.contains(target)) setWriteModelOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [writeModelOpen]);
 
   // Confirm rewrite with user-provided instructions
   const handleConfirmRewrite = async () => {
@@ -730,6 +748,9 @@ export default function Dashboard() {
     setNewKeyword('');
     setWriteInstructions('');
     setWebsite('');
+    setWriteModel(writeModelOptions[0] || '');
+    setWriteModelQuery('');
+    setWriteModelOpen(false);
     setShowWriteModal(true);
   };
 
@@ -754,6 +775,7 @@ export default function Dashboard() {
     const titleKey = String(article.title ?? '');
     setShowWriteModal(false);
     setArticleToWrite(null);
+    setWriteModelOpen(false);
     setWritingIds(prev => {
       const next = new Set(prev);
       if (idKey) next.add(idKey);
@@ -772,6 +794,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           id: article.id,
           title: article.title,
+          model: writeModel || undefined,
           word_limit: wordLimit,
           additional_keywords: extraKeywords,
           mentions_per_keyword: { min: mentionRange.min, max: mentionRange.max },
@@ -1523,13 +1546,13 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
             className="absolute inset-0 bg-black/40"
-            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); }}
+            onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); setWriteModelOpen(false); setWriteModelQuery(''); }}
           />
           <div className="relative bg-white w-full max-w-sm mx-auto rounded-lg shadow-lg border p-6 z-10">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Write Options</h3>
               <button
-                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); }}
+                onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); setWriteModelOpen(false); setWriteModelQuery(''); }}
                 className="p-2 rounded hover:bg-gray-100 text-gray-600"
                 aria-label="Close"
               >
@@ -1617,6 +1640,49 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
               </div>
 
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <div ref={writeModelDropdownRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setWriteModelOpen(v => !v)}
+                    className="w-full inline-flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <span className="truncate text-gray-900">{writeModel || 'Select a model'}</span>
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-500">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+
+                  {writeModelOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-2 rounded-md border border-gray-200 bg-white shadow-lg z-20">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          value={writeModelQuery}
+                          onChange={(e) => setWriteModelQuery(e.target.value)}
+                          placeholder="Search model..."
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div className="max-h-72 overflow-auto py-1">
+                        {writeModelOptions
+                          .filter(m => m.toLowerCase().includes(writeModelQuery.trim().toLowerCase()))
+                          .map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => { setWriteModel(m); setWriteModelOpen(false); }}
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${m === writeModel ? 'bg-gray-100' : ''}`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instructions or prompt</label>
                 <textarea
                   value={writeInstructions}
@@ -1630,7 +1696,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
               <div className="flex justify-end gap-3">
                 <button
                   type="button"
-                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); }}
+                  onClick={() => { setShowWriteModal(false); setArticleToWrite(null); setExtraKeywords([]); setNewKeyword(''); setWriteInstructions(''); setWebsite(''); setWriteModelOpen(false); setWriteModelQuery(''); }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
                 >
                   Cancel
