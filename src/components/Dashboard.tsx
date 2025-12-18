@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type FormEvent } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, type FormEvent } from 'react';
 import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp, Trash } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
@@ -66,6 +66,44 @@ export default function Dashboard() {
   const [showRewriteModal, setShowRewriteModal] = useState(false);
   const [articleToRewrite, setArticleToRewrite] = useState<ResearchArticle | null>(null);
   const [rewriteInstructions, setRewriteInstructions] = useState<string>('');
+  const rewriteModelOptions = useMemo(() => (
+    [
+      'openai/gpt-4o-mini',
+      'openai/gpt-4o',
+      'openai/gpt-4.1-mini',
+      'openai/gpt-4.1',
+
+      'anthropic/claude-3.5-sonnet',
+      'anthropic/claude-3-opus',
+      'anthropic/claude-3-haiku',
+
+      'google/gemini-1.5-pro',
+      'google/gemini-1.5-flash',
+
+      'meta-llama/llama-3.1-70b-instruct',
+      'meta-llama/llama-3.1-8b-instruct',
+      'meta-llama/llama-3-70b-instruct',
+      'meta-llama/llama-3-8b-instruct',
+
+      'allenai/olmo-3-32b-think:free',
+      'allenai/olmo-2-0325-32b-instruct',
+
+      'mistralai/mistral-large',
+      'mistralai/mixtral-8x7b-instruct',
+
+      'amazon/nova-lite-v1',
+      'amazon/nova-micro-v1',
+
+      'alpindale/goliath-120b',
+
+      'x-ai/grok-2',
+      'x-ai/grok-2-mini',
+    ]
+  ), []);
+  const [rewriteModel, setRewriteModel] = useState<string>(rewriteModelOptions[0] || '');
+  const [rewriteModelOpen, setRewriteModelOpen] = useState(false);
+  const [rewriteModelQuery, setRewriteModelQuery] = useState('');
+  const rewriteModelDropdownRef = useRef<HTMLDivElement | null>(null);
   // Optional instructions for Write
   const [writeInstructions, setWriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
@@ -101,8 +139,23 @@ export default function Dashboard() {
   const handleOpenRewriteModal = (article: ResearchArticle) => {
     setArticleToRewrite(article);
     setRewriteInstructions('');
+    setRewriteModel(rewriteModelOptions[0] || '');
+    setRewriteModelQuery('');
+    setRewriteModelOpen(false);
     setShowRewriteModal(true);
   };
+
+  useEffect(() => {
+    if (!rewriteModelOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = rewriteModelDropdownRef.current;
+      const target = e.target as Node | null;
+      if (!el || !target) return;
+      if (!el.contains(target)) setRewriteModelOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [rewriteModelOpen]);
 
   // Confirm rewrite with user-provided instructions
   const handleConfirmRewrite = async () => {
@@ -131,7 +184,7 @@ export default function Dashboard() {
     const instr = rewriteInstructions.trim() || undefined;
     setRewriteInstructions('');
     setToast('Started rewriting this article');
-    await handleRewriteForArticle(a, instr);
+    await handleRewriteForArticle(a, instr, rewriteModel);
   };
 
   // Optimistic placeholder rows inserted immediately after sending a keyword
@@ -239,7 +292,7 @@ export default function Dashboard() {
   const [deletingTagId, setDeletingTagId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
-  const fetchTags = async () => {
+  const fetchTags = useCallback(async () => {
     try {
       setTagLoading(true);
       setTagError(null);
@@ -270,18 +323,16 @@ export default function Dashboard() {
     } finally {
       setTagLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { if (showTagModal) { fetchTags(); } }, [showTagModal]);
-  // Temporary: touch variables used in JSX to satisfy lints in some IDE states
-  useEffect(() => { void deletingTagId; void confirmDeleteId; void deleteTag; }, []);
+  useEffect(() => { if (showTagModal) { fetchTags(); } }, [showTagModal, fetchTags]);
   // Close per-row tag dropdown when clicking outside
   useEffect(() => {
     const onDocClick = () => setOpenTagMenuKey(null);
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
-  useEffect(() => { if (tagRows.length === 0) { fetchTags(); } }, []);
+  useEffect(() => { if (tagRows.length === 0) { fetchTags(); } }, [fetchTags, tagRows.length]);
 
   const applyTagToRow = (rowKey: string, tr: TagRow) => {
     const safeKey = String(rowKey || '').trim();
@@ -326,7 +377,7 @@ export default function Dashboard() {
     }
   };
 
-  const deleteTag = async (id: number, name?: string) => {
+  const deleteTag = useCallback(async (id: number, name?: string) => {
     setDeletingTagId(id);
     try {
       const { error } = await supabase.from('tag').delete().eq('id', id);
@@ -351,7 +402,10 @@ export default function Dashboard() {
     } finally {
       setDeletingTagId(null);
     }
-  };
+  }, [fetchTags]);
+
+  // Temporary: touch variables used in JSX to satisfy lints in some IDE states
+  useEffect(() => { void deletingTagId; void confirmDeleteId; void deleteTag; }, [deletingTagId, confirmDeleteId, deleteTag]);
 
   // Prune stale writing ids (older than 2h without a matching DB row)
   useEffect(() => {
@@ -460,7 +514,7 @@ export default function Dashboard() {
   };
 
   // Send rewrite request directly to the provided webhook (optionally include instructions)
-  const handleRewriteForArticle = async (article: ResearchArticle, instructions?: string) => {
+  const handleRewriteForArticle = async (article: ResearchArticle, instructions?: string, model?: string) => {
     if (!article) return;
     const idKey = String(article.id ?? '');
     const titleKey = String(article.title ?? '');
@@ -493,6 +547,7 @@ export default function Dashboard() {
         action?: string;
         source?: string;
         instructions?: string;
+        model?: string;
       };
       const payloads: RewritePayload[] = [
         {
@@ -508,9 +563,10 @@ export default function Dashboard() {
           action: 'rewrite',
           source: 'dashboard-rewrite',
           instructions: instructions || undefined,
+          model: model || undefined,
         },
-        { id: article.id, title: article.title, action: 'rewrite', instructions: instructions || undefined },
-        { doc_link: article.doc_link ?? null, action: 'rewrite', instructions: instructions || undefined },
+        { id: article.id, title: article.title, action: 'rewrite', instructions: instructions || undefined, model: model || undefined },
+        { doc_link: article.doc_link ?? null, action: 'rewrite', instructions: instructions || undefined, model: model || undefined },
       ];
       let ok = false;
       let lastTxt = '';
@@ -1350,6 +1406,48 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
               <p className="text-sm text-gray-600 mb-3">{articleToRewrite.title}</p>
             )}
             <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+                <div ref={rewriteModelDropdownRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setRewriteModelOpen(v => !v)}
+                    className="w-full inline-flex items-center justify-between px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <span className="truncate text-gray-900">{rewriteModel || 'Select a model'}</span>
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-500">
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+
+                  {rewriteModelOpen && (
+                    <div className="absolute top-full left-0 right-0 mt-2 rounded-md border border-gray-200 bg-white shadow-lg z-20">
+                      <div className="p-2 border-b border-gray-100">
+                        <input
+                          value={rewriteModelQuery}
+                          onChange={(e) => setRewriteModelQuery(e.target.value)}
+                          placeholder="Search model..."
+                          className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div className="max-h-72 overflow-auto py-1">
+                        {rewriteModelOptions
+                          .filter(m => m.toLowerCase().includes(rewriteModelQuery.trim().toLowerCase()))
+                          .map(m => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => { setRewriteModel(m); setRewriteModelOpen(false); }}
+                              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${m === rewriteModel ? 'bg-gray-100' : ''}`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instructions or prompt</label>
                 <textarea
