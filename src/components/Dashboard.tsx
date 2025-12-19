@@ -148,12 +148,31 @@ export default function Dashboard() {
   const [rewriteModelOpen, setRewriteModelOpen] = useState(false);
   const [rewriteModelQuery, setRewriteModelQuery] = useState('');
   const rewriteModelDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [rewriteModalNotice, setRewriteModalNotice] = useState<string | null>(null);
+
+  const cleanErrorMessage = (rawMsg: string): string => {
+    // Remove technical JSON syntax and make user-friendly
+    let cleaned = rawMsg
+      .replace(/^\[?\s*\{\s*"[Ff]ailed"\s*:\s*"?/, '')
+      .replace(/"\s*\}\s*\]?$/, '')
+      .replace(/\\n/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    
+    // If it's still too technical, provide a generic friendly message
+    if (cleaned.includes('{') || cleaned.includes('}') || cleaned.includes('"') || cleaned.length > 200) {
+      cleaned = 'This model is currently experiencing capacity issues and may not work reliably.';
+    }
+    
+    return cleaned;
+  };
 
   const writeModelOptions = rewriteModelOptions;
   const [writeModel, setWriteModel] = useState<string>(defaultModel);
   const [writeModelOpen, setWriteModelOpen] = useState(false);
   const [writeModelQuery, setWriteModelQuery] = useState('');
   const writeModelDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [writeModalNotice, setWriteModalNotice] = useState<string | null>(null);
   // Optional instructions for Write
   const [writeInstructions, setWriteInstructions] = useState<string>('');
   // Additional keywords for Write (array of keyword strings) and per-keyword mention range derived from word limit
@@ -186,12 +205,14 @@ export default function Dashboard() {
   }, [wordLimit]);
 
   // Open modal to ask for rewrite prompt
-  const handleOpenRewriteModal = (article: ResearchArticle) => {
+  const handleOpenRewriteModal = (article: ResearchArticle, instructions?: string, model?: string) => {
+    if (!article) return;
     setArticleToRewrite(article);
-    setRewriteInstructions('');
-    setRewriteModel(defaultModel);
+    setRewriteInstructions(instructions || '');
+    setRewriteModel(model || defaultModel);
     setRewriteModelQuery('');
     setRewriteModelOpen(false);
+    setRewriteModalNotice(null);
     setShowRewriteModal(true);
   };
 
@@ -218,6 +239,8 @@ export default function Dashboard() {
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
   }, [writeModelOpen]);
+
+  // Keep writeModalNotice persistent until user changes context (no auto-hide)
 
   // Confirm rewrite with user-provided instructions
   const handleConfirmRewrite = async () => {
@@ -595,24 +618,10 @@ export default function Dashboard() {
       ...(titleKey ? { [titleKey]: { id: article.id as number | string | undefined, title: article.title, startedAt, prevDocLink, prevContent } } : {}),
     }));
     try {
-      const url = '/api/rewrite';
-      type RewritePayload = {
-        id?: number | string;
-        title?: string;
-        keyword?: string;
-        doc_link?: string | null;
-        content?: string | null;
-        status?: string;
-        word_limit?: number;
-        additional_keywords?: string[];
-        mentions_per_keyword?: { min: number; max: number };
-        action?: string;
-        source?: string;
-        instructions?: string;
-        model?: string;
-      };
-      const payloads: RewritePayload[] = [
-        {
+      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/rewrite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           id: article.id,
           title: article.title,
           keyword: article.keyword,
@@ -626,23 +635,40 @@ export default function Dashboard() {
           source: 'dashboard-rewrite',
           instructions: instructions || undefined,
           model: model || undefined,
-        },
-        { id: article.id, title: article.title, action: 'rewrite', instructions: instructions || undefined, model: model || undefined },
-        { doc_link: article.doc_link ?? null, action: 'rewrite', instructions: instructions || undefined, model: model || undefined },
-      ];
-      let ok = false;
-      let lastTxt = '';
-      for (const body of payloads) {
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (resp.ok) { ok = true; break; }
-        lastTxt = await resp.text();
+        }),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Rewrite webhook error: ${resp.status} ${txt}`);
       }
-      if (!ok) {
-        throw new Error(`Rewrite webhook returned non-200. Last response: ${lastTxt || 'No body'}`);
+      // Check for failure messages in response body even if HTTP 200
+      const okBodyText = await resp.text();
+      if (okBodyText && okBodyText.trim()) {
+        try {
+          const getFailed = (obj: unknown): string => {
+            if (!obj || typeof obj !== 'object') return '';
+            const rec = obj as Record<string, unknown>;
+            const keys = ['Failed', 'failed', 'FAILURE', 'error'];
+            for (const k of keys) {
+              const v = rec[k];
+              if (typeof v === 'string') return v;
+            }
+            return '';
+          };
+          const json = JSON.parse(okBodyText) as unknown;
+          let failedMsg = '';
+          if (Array.isArray(json)) {
+            failedMsg = getFailed(json[0]);
+          } else {
+            failedMsg = getFailed(json);
+          }
+          if (failedMsg) throw new Error(failedMsg);
+        } catch {
+          const txt = okBodyText.toLowerCase();
+          if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
+            throw new Error(okBodyText);
+          }
+        }
       }
       // Kick off background refreshes to pick up the updated content
       try { await refetch(); } catch (e) { void e; }
@@ -665,11 +691,28 @@ export default function Dashboard() {
       }, 30000);
     } catch (err) {
       console.error(err);
-      if (err instanceof Error) {
-        window.alert(`Failed to send rewrite request: ${err.message}`);
-      } else {
-        window.alert('Failed to send rewrite request');
-      }
+      // Clear loading state on error
+      setRewritingIds(prev => {
+        const next = new Set(prev);
+        if (idKey) next.delete(idKey);
+        if (titleKey) next.delete(titleKey);
+        return next;
+      });
+      setRewritingMeta(prev => { const n = { ...prev }; if (idKey) delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
+      // Show error notice and reopen modal with previous selections
+      const msg = err instanceof Error ? err.message : 'Failed to send rewrite request';
+      const formSnapshot = {
+        instructions: instructions || '',
+        model: model || defaultModel,
+      };
+      setArticleToRewrite(article);
+      setRewriteInstructions(formSnapshot.instructions);
+      setRewriteModel(formSnapshot.model);
+      setRewriteModelQuery('');
+      setRewriteModelOpen(false);
+      setRewriteModalNotice(msg);
+      setShowRewriteModal(true);
+      // On error, clear pending state for this row
     } finally {
       // Do not clear rewritingIds here; we'll clear it when the article status updates
       // and our effect detects completion. This keeps the row button in loading state
@@ -756,6 +799,7 @@ export default function Dashboard() {
     setWriteModel(defaultModel);
     setWriteModelQuery('');
     setWriteModelOpen(false);
+    setWriteModalNotice(null);
     setShowWriteModal(true);
   };
 
@@ -776,6 +820,13 @@ export default function Dashboard() {
   const handleConfirmWrite = async () => {
     if (!articleToWrite) return;
     const article = articleToWrite;
+    const formSnapshot = {
+      wordLimit,
+      extraKeywords: [...extraKeywords],
+      writeInstructions,
+      website,
+      model: writeModel,
+    };
     const idKey = String(article.id ?? '');
     const titleKey = String(article.title ?? '');
     setShowWriteModal(false);
@@ -811,12 +862,42 @@ export default function Dashboard() {
         const txt = await resp.text();
         throw new Error(`Webhook error: ${resp.status} ${txt}`);
       }
+      // Some n8n nodes return a 200 with a body like: [{ "Failed": "..." }]
+      // Sometimes it's served as text/plain, so don't rely on content-type.
+      const okBodyText = await resp.text();
+      if (okBodyText && okBodyText.trim()) {
+        try {
+          const getFailed = (obj: unknown): string => {
+            if (!obj || typeof obj !== 'object') return '';
+            const rec = obj as Record<string, unknown>;
+            const keys = ['Failed', 'failed', 'FAILURE', 'error'];
+            for (const k of keys) {
+              const v = rec[k];
+              if (typeof v === 'string') return v;
+            }
+            return '';
+          };
+          const json = JSON.parse(okBodyText) as unknown;
+          let failedMsg = '';
+          if (Array.isArray(json)) {
+            failedMsg = getFailed(json[0]);
+          } else {
+            failedMsg = getFailed(json);
+          }
+          if (failedMsg) throw new Error(failedMsg);
+        } catch {
+          // If it wasn't JSON, but includes the pattern textually, treat as failure.
+          const txt = okBodyText.toLowerCase();
+          if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
+            throw new Error(okBodyText);
+          }
+        }
+      }
       // Do not auto refresh here; row stays marked as writing until backend completes
     } catch (err) {
-      console.error('Delete failed', err);
-      const msg = err instanceof Error ? err.message : 'Failed to delete row';
-      window.alert(msg);
-      // On error, clear pending state for this row
+      console.error('Write failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to write';
+      // Clear pending state for this row
       setWritingIds(prev => {
         const next = new Set(prev);
         next.delete(idKey);
@@ -824,6 +905,19 @@ export default function Dashboard() {
         return next;
       });
       setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
+      // Re-open modal with previous selections + show in-modal notice
+      setArticleToWrite(article);
+      setWordLimit(formSnapshot.wordLimit);
+      setExtraKeywords(formSnapshot.extraKeywords);
+      setNewKeyword('');
+      setWriteInstructions(formSnapshot.writeInstructions);
+      setWebsite(formSnapshot.website);
+      setWriteModel(formSnapshot.model);
+      setWriteModelQuery('');
+      setWriteModelOpen(false);
+      setWriteModalNotice(msg);
+      setShowWriteModal(true);
+      // On error, clear pending state for this row
     }
   };
 
@@ -1504,7 +1598,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                             <button
                               key={m}
                               type="button"
-                              onClick={() => { setRewriteModel(m); setRewriteModelOpen(false); }}
+                              onClick={() => { const changed = m !== rewriteModel; setRewriteModel(m); setRewriteModelOpen(false); if (changed) setRewriteModalNotice(null); }}
                               className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${m === rewriteModel ? 'bg-gray-100' : ''}`}
                             >
                               {m}
@@ -1514,6 +1608,26 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                     </div>
                   )}
                 </div>
+                {rewriteModalNotice && (
+                  <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-shrink-0 mt-0.5">
+                        <svg className="w-4 h-4 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-amber-900 mb-1">This model isn't working right now</div>
+                        <div className="text-amber-800 mb-2 leading-relaxed">
+                          {cleanErrorMessage(rewriteModalNotice || '')}
+                        </div>
+                        <div className="text-amber-700 text-xs font-medium">
+                          💡 Try selecting a different model from the dropdown above for better results
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Instructions or prompt</label>
@@ -1675,7 +1789,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                             <button
                               key={m}
                               type="button"
-                              onClick={() => { setWriteModel(m); setWriteModelOpen(false); }}
+                              onClick={() => { const changed = m !== writeModel; setWriteModel(m); setWriteModelOpen(false); if (changed) setWriteModalNotice(null); }}
                               className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 ${m === writeModel ? 'bg-gray-100' : ''}`}
                             >
                               {m}
@@ -1685,6 +1799,26 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                     </div>
                   )}
                 </div>
+                {writeModalNotice && (
+                  <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    <div className="flex items-start gap-2">
+                      <div className="flex-shrink-0 mt-0.5">
+                        <svg className="w-4 h-4 text-amber-600" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-medium text-amber-900 mb-1">This model isn't working right now</div>
+                        <div className="text-amber-800 mb-2 leading-relaxed">
+                          {cleanErrorMessage(writeModalNotice || '')}
+                        </div>
+                        <div className="text-amber-700 text-xs font-medium">
+                          💡 Try selecting a different model from the dropdown above for better results
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
