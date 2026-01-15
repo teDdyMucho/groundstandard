@@ -162,7 +162,7 @@ export default function Dashboard() {
     
     // If it's still too technical, provide a generic friendly message
     if (cleaned.includes('{') || cleaned.includes('}') || cleaned.includes('"') || cleaned.length > 200) {
-      cleaned = 'This model is currently experiencing capacity issues and may not work reliably.';
+      cleaned = 'OpenAI has run out of balance. Please top up your OpenAI account.';
     }
     
     return cleaned;
@@ -646,7 +646,7 @@ export default function Dashboard() {
           t.includes('billing') || t.includes('capacity') || t.includes('limit') ||
           t.includes('rate limit') || t.includes('insufficient_quota')
         ) {
-          setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+          setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
         }
         throw new Error(`Rewrite webhook error: ${resp.status} ${txt}`);
       }
@@ -678,7 +678,7 @@ export default function Dashboard() {
               f.includes('billing') || f.includes('capacity') || f.includes('limit') ||
               f.includes('rate limit') || f.includes('insufficient_quota')
             ) {
-              setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+              setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
             }
             throw new Error(failedMsg);
           }
@@ -726,7 +726,7 @@ export default function Dashboard() {
         m.includes('billing') || m.includes('capacity') || m.includes('limit') ||
         m.includes('rate limit') || m.includes('insufficient_quota')
       ) {
-        setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+        setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
       }
       const formSnapshot = {
         instructions: instructions || '',
@@ -848,7 +848,7 @@ export default function Dashboard() {
               txt.includes('billing') || txt.includes('capacity') || txt.includes('limit') ||
               txt.includes('rate limit') || txt.includes('insufficient_quota')
             ) {
-              setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+              setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
             }
             throw new Error(okBodyText);
           }
@@ -967,7 +967,7 @@ export default function Dashboard() {
       ...(titleKey ? { [titleKey]: { id: article.id, title: article.title, keyword: (article).keyword || '', startedAt: Date.now() } } : {}),
     }));
     try {
-      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Write', {
+      const resp = await fetch('/api/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -983,6 +983,15 @@ export default function Dashboard() {
       });
       if (!resp.ok) {
         const txt = await resp.text();
+        const t = txt.toLowerCase();
+        if (
+          t.includes('insufficient') || t.includes('quota') || t.includes('balance') ||
+          t.includes('billing') || t.includes('capacity') || t.includes('limit') ||
+          t.includes('rate limit') || t.includes('insufficient_quota')
+        ) {
+          // Surface a friendly message inside the Write modal
+          setWriteModalNotice('OpenAI has run out of balance. Please top up your OpenAI account.');
+        }
         throw new Error(`Webhook error: ${resp.status} ${txt}`);
       }
       // Some n8n nodes return a 200 with a body like: [{ "Failed": "..." }]
@@ -1007,11 +1016,28 @@ export default function Dashboard() {
           } else {
             failedMsg = getFailed(json);
           }
-          if (failedMsg) throw new Error(failedMsg);
+          if (failedMsg) {
+            const f = failedMsg.toLowerCase();
+            if (
+              f.includes('insufficient') || f.includes('quota') || f.includes('balance') ||
+              f.includes('billing') || f.includes('capacity') || f.includes('limit') ||
+              f.includes('rate limit') || f.includes('insufficient_quota')
+            ) {
+              setWriteModalNotice('OpenAI has run out of balance. Please top up your OpenAI account.');
+            }
+            throw new Error(failedMsg);
+          }
         } catch {
           // If it wasn't JSON, but includes the pattern textually, treat as failure.
           const txt = okBodyText.toLowerCase();
           if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
+            if (
+              txt.includes('insufficient') || txt.includes('quota') || txt.includes('balance') ||
+              txt.includes('billing') || txt.includes('capacity') || txt.includes('limit') ||
+              txt.includes('rate limit') || txt.includes('insufficient_quota')
+            ) {
+              setWriteModalNotice('OpenAI has run out of balance. Please top up your OpenAI account.');
+            }
             throw new Error(okBodyText);
           }
         }
@@ -1020,6 +1046,14 @@ export default function Dashboard() {
     } catch (err) {
       console.error('Write failed', err);
       const msg = err instanceof Error ? err.message : 'Failed to write';
+      const m = msg.toLowerCase();
+      if (
+        m.includes('insufficient') || m.includes('quota') || m.includes('balance') ||
+        m.includes('billing') || m.includes('capacity') || m.includes('limit') ||
+        m.includes('rate limit') || m.includes('insufficient_quota')
+      ) {
+        setWriteModalNotice('OpenAI has run out of balance. Please top up your OpenAI account.');
+      }
       // Clear pending state for this row
       setWritingIds(prev => {
         const next = new Set(prev);
@@ -1744,9 +1778,6 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <div className="text-amber-800 mb-2 leading-relaxed">
                           {cleanErrorMessage(rewriteModalNotice || '')}
                         </div>
-                        <div className="text-amber-700 text-xs font-medium">
-                          💡 Try selecting a different model from the dropdown above for better results
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1934,9 +1965,6 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                         <div className="font-medium text-amber-900 mb-1">This model isn't working right now</div>
                         <div className="text-amber-800 mb-2 leading-relaxed">
                           {cleanErrorMessage(writeModalNotice || '')}
-                        </div>
-                        <div className="text-amber-700 text-xs font-medium">
-                          💡 Try selecting a different model from the dropdown above for better results
                         </div>
                       </div>
                     </div>
