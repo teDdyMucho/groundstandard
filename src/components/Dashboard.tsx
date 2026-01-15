@@ -2749,33 +2749,65 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                   <div>
                     <nav className="flex items-center space-x-3">
                       <button
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                        className="inline-flex items-center px-4 py-2.5 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                      >
+                        First
+                      </button>
+                      <button
                         onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                         disabled={currentPage === 1}
-                        className="inline-flex items-center px-5 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                        className="inline-flex items-center px-4 py-2.5 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
                       >
                         Previous
                       </button>
-                      <div className="flex items-center space-x-2">
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                          <button
-                            key={page}
-                            onClick={() => setCurrentPage(page)}
-                            className={`inline-flex items-center px-4 py-3 text-sm font-bold rounded-xl transition-all duration-200 shadow-sm ${
-                              page === currentPage
-                                ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg border-2 border-blue-500 transform scale-110'
-                                : 'text-black bg-white border-2 border-gray-300 hover:bg-gray-50 hover:border-blue-400'
-                            }`}
-                          >
-                            {page}
-                          </button>
-                        ))}
+                      <div className="flex items-center space-x-2 max-w-[60vw] overflow-x-auto scrollbar-thin">
+                        {(() => {
+                          const pages: (number | 'ellipsis')[] = [];
+                          if (totalPages <= 9) {
+                            for (let p = 1; p <= totalPages; p++) pages.push(p);
+                          } else {
+                            const start = Math.max(2, currentPage - 2);
+                            const end = Math.min(totalPages - 1, currentPage + 2);
+                            pages.push(1);
+                            if (start > 2) pages.push('ellipsis');
+                            for (let p = start; p <= end; p++) pages.push(p);
+                            if (end < totalPages - 1) pages.push('ellipsis');
+                            pages.push(totalPages);
+                          }
+                          return pages.map((item, idx) =>
+                            item === 'ellipsis' ? (
+                              <span key={`e-${idx}`} className="px-2 text-gray-500 select-none">…</span>
+                            ) : (
+                              <button
+                                key={item}
+                                onClick={() => setCurrentPage(item)}
+                                className={`inline-flex items-center px-4 py-2.5 text-sm font-bold rounded-xl transition-all duration-200 shadow-sm ${
+                                  item === currentPage
+                                    ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg border-2 border-blue-500'
+                                    : 'text-black bg-white border-2 border-gray-300 hover:bg-gray-50 hover:border-blue-400'
+                                }`}
+                              >
+                                {item}
+                              </button>
+                            )
+                          );
+                        })()}
                       </div>
                       <button
                         onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                         disabled={currentPage === totalPages}
-                        className="inline-flex items-center px-5 py-3 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                        className="inline-flex items-center px-4 py-2.5 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
                       >
                         Next
+                      </button>
+                      <button
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                        className="inline-flex items-center px-4 py-2.5 text-sm font-bold text-black bg-white border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                      >
+                        Last
                       </button>
                     </nav>
                   </div>
