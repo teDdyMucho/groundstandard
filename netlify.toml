@@ -8,6 +8,30 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/research"
+  to = "https://groundstandard.app.n8n.cloud/webhook/Research"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/write"
+  to = "https://groundstandard.app.n8n.cloud/webhook/Write"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/tag"
+  to = "https://groundstandard.app.n8n.cloud/webhook/Tag"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/chat-bot"
+  to = "https://groundstandard.app.n8n.cloud/webhook/chat-bot"
+  status = 200
+  force = true
+
 # Optional: If your app is an SPA, uncomment this to handle client-side routes
 # [[redirects]]
 #   from = "/*"

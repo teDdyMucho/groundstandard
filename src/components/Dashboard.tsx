@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [contentTitle, setContentTitle] = useState<string>('');
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [aiWarning, setAiWarning] = useState<string | null>(null);
   // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending;
   // Track which rows are in the process of sending a Write request
@@ -618,7 +619,7 @@ export default function Dashboard() {
       ...(titleKey ? { [titleKey]: { id: article.id as number | string | undefined, title: article.title, startedAt, prevDocLink, prevContent } } : {}),
     }));
     try {
-      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/rewrite', {
+      const resp = await fetch('/api/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -639,6 +640,14 @@ export default function Dashboard() {
       });
       if (!resp.ok) {
         const txt = await resp.text();
+        const t = txt.toLowerCase();
+        if (
+          t.includes('insufficient') || t.includes('quota') || t.includes('balance') ||
+          t.includes('billing') || t.includes('capacity') || t.includes('limit') ||
+          t.includes('rate limit') || t.includes('insufficient_quota')
+        ) {
+          setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+        }
         throw new Error(`Rewrite webhook error: ${resp.status} ${txt}`);
       }
       // Check for failure messages in response body even if HTTP 200
@@ -662,7 +671,17 @@ export default function Dashboard() {
           } else {
             failedMsg = getFailed(json);
           }
-          if (failedMsg) throw new Error(failedMsg);
+          if (failedMsg) {
+            const f = failedMsg.toLowerCase();
+            if (
+              f.includes('insufficient') || f.includes('quota') || f.includes('balance') ||
+              f.includes('billing') || f.includes('capacity') || f.includes('limit') ||
+              f.includes('rate limit') || f.includes('insufficient_quota')
+            ) {
+              setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+            }
+            throw new Error(failedMsg);
+          }
         } catch {
           const txt = okBodyText.toLowerCase();
           if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
@@ -701,6 +720,14 @@ export default function Dashboard() {
       setRewritingMeta(prev => { const n = { ...prev }; if (idKey) delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
       // Show error notice and reopen modal with previous selections
       const msg = err instanceof Error ? err.message : 'Failed to send rewrite request';
+      const m = msg.toLowerCase();
+      if (
+        m.includes('insufficient') || m.includes('quota') || m.includes('balance') ||
+        m.includes('billing') || m.includes('capacity') || m.includes('limit') ||
+        m.includes('rate limit') || m.includes('insufficient_quota')
+      ) {
+        setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+      }
       const formSnapshot = {
         instructions: instructions || '',
         model: model || defaultModel,
@@ -755,7 +782,7 @@ export default function Dashboard() {
     // Close modal right away; we will refetch in background
     setShowAddModal(false);
     try {
-      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/Research', {
+      const resp = await fetch('/api/research', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -771,7 +798,61 @@ export default function Dashboard() {
       });
       if (!resp.ok) {
         const txt = await resp.text();
+        const t = txt.toLowerCase();
+        if (
+          t.includes('insufficient') || t.includes('quota') || t.includes('balance') ||
+          t.includes('billing') || t.includes('capacity') || t.includes('limit') ||
+          t.includes('rate limit') || t.includes('insufficient_quota')
+        ) {
+          setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+        }
         throw new Error(`Webhook error: ${resp.status} ${txt}`);
+      }
+      // Some n8n nodes return 200 with a body containing a failure message
+      const okBodyText = await resp.text();
+      if (okBodyText && okBodyText.trim()) {
+        try {
+          const getFailed = (obj: unknown): string => {
+            if (!obj || typeof obj !== 'object') return '';
+            const rec = obj as Record<string, unknown>;
+            const keys = ['Failed', 'failed', 'FAILURE', 'error'];
+            for (const k of keys) {
+              const v = rec[k];
+              if (typeof v === 'string') return v;
+            }
+            return '';
+          };
+          const json = JSON.parse(okBodyText) as unknown;
+          let failedMsg = '';
+          if (Array.isArray(json)) {
+            failedMsg = getFailed(json[0]);
+          } else {
+            failedMsg = getFailed(json);
+          }
+          if (failedMsg) {
+            const f = failedMsg.toLowerCase();
+            if (
+              f.includes('insufficient') || f.includes('quota') || f.includes('balance') ||
+              f.includes('billing') || f.includes('capacity') || f.includes('limit') ||
+              f.includes('rate limit') || f.includes('insufficient_quota')
+            ) {
+              setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+            }
+            throw new Error(failedMsg);
+          }
+        } catch {
+          const txt = okBodyText.toLowerCase();
+          if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
+            if (
+              txt.includes('insufficient') || txt.includes('quota') || txt.includes('balance') ||
+              txt.includes('billing') || txt.includes('capacity') || txt.includes('limit') ||
+              txt.includes('rate limit') || txt.includes('insufficient_quota')
+            ) {
+              setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+            }
+            throw new Error(okBodyText);
+          }
+        }
       }
       setSendSuccess(true);
       setKeywordInput('');
@@ -782,7 +863,49 @@ export default function Dashboard() {
       setCallToAction('');
       // Do not auto refresh here
     } catch (err) {
-      setSendError(err instanceof Error ? err.message : 'Failed to send keyword');
+      // If webhook failed due to capacity/balance, show warning; then fallback insert
+      const msg = err instanceof Error ? err.message : String(err || '');
+      const m = msg.toLowerCase();
+      if (
+        m.includes('insufficient') || m.includes('quota') || m.includes('balance') ||
+        m.includes('billing') || m.includes('capacity') || m.includes('limit') ||
+        m.includes('rate limit') || m.includes('insufficient_quota')
+      ) {
+        setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+      }
+      // Fallback: insert placeholder rows directly into Supabase so the user still sees created items
+      try {
+        const insertRows = Array.from({ length: count }).map(() => ({
+          title: 'Processing...'
+          , keyword: kw,
+          doc_link: null,
+          content: null,
+          status: 'processing',
+          business_name: bizName || null,
+          website: null,
+        }));
+        const { error: insertError } = await supabase
+          .from('Research')
+          .insert(insertRows);
+        if (insertError) {
+          throw insertError;
+        }
+        setSendSuccess(true);
+        setKeywordInput('');
+        setKeywordCount('1');
+        setBizName('');
+        setCity('');
+        setProvState('');
+        setCallToAction('');
+        // Let realtime/refetch pick these up shortly
+      } catch (fallbackErr) {
+        console.error('Create fallback failed:', fallbackErr);
+        setSendError(
+          fallbackErr instanceof Error
+            ? `Create failed: ${fallbackErr.message}`
+            : 'Failed to create articles'
+        );
+      }
     } finally {
       setSending(false);
     }
@@ -927,7 +1050,7 @@ export default function Dashboard() {
     const color = tagColor.trim() || '#2563eb';
     if (!name) { window.alert('Please enter a tag name.'); return; }
     try {
-      await fetch('https://groundstandard.app.n8n.cloud/webhook/Tag', {
+      await fetch('/api/tag', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tag: name, color }),
@@ -2676,7 +2799,26 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         )}
 
         {/* Floating Chat Widget (bottom-left) */}
-        <ChatWidget webhookUrl="https://groundstandard.app.n8n.cloud/webhook/chat-bot" />
+        <ChatWidget webhookUrl="/api/chat-bot" />
+        {aiWarning && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setAiWarning(null)} />
+            <div className="relative bg-white w-full max-w-md mx-auto rounded-2xl shadow-2xl border border-gray-200 p-6 z-10">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-black mb-1">Service Capacity / Balance Reached</h3>
+                  <p className="text-sm text-gray-700">{aiWarning}</p>
+                </div>
+              </div>
+              <div className="mt-6 flex justify-end">
+                <button onClick={() => setAiWarning(null)} className="inline-flex items-center px-4 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-sm transition-all duration-200">OK</button>
+              </div>
+            </div>
+          </div>
+        )}
         {toast && (
           <div className="fixed top-6 right-6 z-50 animate-in slide-in-from-right-full duration-300">
             <div className="bg-white/90 backdrop-blur-sm border border-gray-200 text-black px-6 py-4 rounded-xl shadow-xl text-sm font-medium max-w-sm">
