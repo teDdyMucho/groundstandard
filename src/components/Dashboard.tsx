@@ -863,17 +863,45 @@ export default function Dashboard() {
       setCallToAction('');
       // Do not auto refresh here
     } catch (err) {
-      // If webhook failed due to capacity/balance, show warning; then fallback insert
+      // If webhook failed due to balance/capacity, show warning, revert optimistic rows, and reopen Create modal
       const msg = err instanceof Error ? err.message : String(err || '');
       const m = msg.toLowerCase();
-      if (
+      const isBalanceIssue = (
         m.includes('insufficient') || m.includes('quota') || m.includes('balance') ||
         m.includes('billing') || m.includes('capacity') || m.includes('limit') ||
         m.includes('rate limit') || m.includes('insufficient_quota')
-      ) {
-        setAiWarning('The AI provider is currently out of balance or capacity. Please top up your OpenAI balance or try again later.');
+      );
+      if (isBalanceIssue) {
+        setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
+        // Remove the optimistic placeholder rows we just added
+        setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
+        // Hard reset any remaining temp rows just in case
+        setOptimisticRows(prev => prev.filter(r => !(r as any)._temp));
+        // Also try to clean up any placeholder rows that may have been inserted previously
+        try {
+          await supabase
+            .from('Research')
+            .delete()
+            .eq('status', 'processing')
+            .eq('keyword', kw)
+            .is('doc_link', null);
+        } catch (e) { console.warn('Cleanup delete failed (safe to ignore):', e); }
+        // Restore form inputs and reopen the Create modal
+        setKeywordInput(kw);
+        setKeywordCount(String(count));
+        setBizName(bizName);
+        setCity(city);
+        setProvState(provState);
+        setCallToAction(callToAction);
+        setSendSuccess(false);
+        setSendError(null);
+        setToast(null);
+        setShowAddModal(true);
+        setSending(false);
+        try { await refetch(); } catch (e) { void e; }
+        return; // Skip Supabase fallback insert on balance/capacity errors
       }
-      // Fallback: insert placeholder rows directly into Supabase so the user still sees created items
+      // Otherwise: Fallback insert placeholder rows into Supabase so the user still sees created items
       try {
         const insertRows = Array.from({ length: count }).map(() => ({
           title: 'Processing...'
