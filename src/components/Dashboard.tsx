@@ -688,25 +688,8 @@ export default function Dashboard() {
           }
         }
       }
-      // Kick off background refreshes to pick up the updated content
-      try { await refetch(); } catch (e) { void e; }
-      // Poll every 3s for 30s to detect the change quickly
-      const idKeyNow = String(article.id ?? '');
-      const titleKeyNow = String(article.title ?? '');
-      const poll = setInterval(() => { try { refetch(); } catch (e) { void e; } }, 3000);
-      setTimeout(() => {
-        clearInterval(poll);
-        // Fallback: after 30s, if still marked rewriting, clear it to avoid a stuck spinner
-        setRewritingIds(prev => {
-          const next = new Set(prev);
-          if (idKeyNow) next.delete(idKeyNow);
-          if (titleKeyNow) next.delete(titleKeyNow);
-          return next;
-        });
-        setRewritingMeta(prev => { const n = { ...prev }; if (idKeyNow) delete n[idKeyNow]; if (titleKeyNow) delete n[titleKeyNow]; return n; });
-        setToast('Rewrite completed');
-        setTimeout(() => setToast(null), 3500);
-      }, 30000);
+      // Auto refresh and polling disabled per user request
+      // User will manually click Refresh to see updated content
     } catch (err) {
       console.error(err);
       // Clear loading state on error
@@ -853,9 +836,7 @@ export default function Dashboard() {
       }
       // On success: remove the optimistic placeholders we added for this request
       setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
-      // Then refetch so the UI shows only finalized rows created by n8n
-      try { await refetch(); } catch (e) { void e; }
-      setSendSuccess(true);
+      // Then refetch so the UI shows only finalized rows created by n8n\nsetSendSuccess(true);
       // Inputs cleanup after success
       setKeywordInput('');
       setKeywordCount('1');
@@ -898,7 +879,6 @@ export default function Dashboard() {
         setToast(null);
         setShowAddModal(true);
         setSending(false);
-        try { await refetch(); } catch (e) { void e; }
         return; // Skip Supabase fallback insert on balance/capacity errors
       }
       // Otherwise: do NOT insert any 'processing' rows into Supabase.
@@ -1151,7 +1131,6 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
     setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
     // Also drop any optimistic placeholders that match this title's keyword if present
     setOptimisticRows(prev => prev.filter(r => r.id !== idKey));
-    await refetch();
   } catch (err) {
     console.error('Delete failed', err);
     const msg = err instanceof Error ? err.message : 'Failed to delete row';
@@ -1274,7 +1253,6 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
         .in('id', idsToDelete);
       if (delError) throw delError;
       setSelectedIds(new Set());
-      await refetch();
     } catch (err) {
       console.error('Bulk delete failed', err);
       const msg = err instanceof Error ? err.message : 'Failed to delete selected rows';
@@ -1471,23 +1449,9 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
 
   // Chat logic lives in ChatWidget now
 
+  // Don't block UI on errors; just log them
   if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="bg-white rounded-lg shadow-sm p-8 max-w-md w-full text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Connection Error</h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <button
-            onClick={refetch}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Retry
-          </button>
-        </div>
-      </div>
-    );
+    console.error('Data fetch error:', error);
   }
 
   return (

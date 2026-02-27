@@ -13,7 +13,9 @@ export function useResearchData() {
       
       const { data, error: fetchError } = await supabase
         .from('Research')
-        .select('*');
+        .select('id, title, keyword, doc_link, content, website, business_name, status')
+        .order('id', { ascending: false })
+        .limit(100);
 
       if (fetchError) {
         throw fetchError;
