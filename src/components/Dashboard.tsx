@@ -418,7 +418,6 @@ export default function Dashboard() {
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
   }, []);
-  useEffect(() => { if (tagRows.length === 0) { fetchTags(); } }, [fetchTags, tagRows.length]);
 
   const applyTagToRow = (rowKey: string, tr: TagRow) => {
     const safeKey = String(rowKey || '').trim();
@@ -760,7 +759,7 @@ export default function Dashboard() {
     setSending(true);
     setSendError(null);
     setSendSuccess(false);
-    // Insert optimistic placeholder rows immediately
+    // Add UI-only optimistic placeholder rows immediately (do NOT write to Supabase)
     const kw = keywordInput.trim();
     const makeId = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
@@ -768,18 +767,16 @@ export default function Dashboard() {
     const now = Date.now();
     const newTemps: OptimisticArticle[] = Array.from({ length: count }).map((_, idx) => ({
       id: makeId(),
-      title: 'Processing...€¦',
+      title: 'Article is processing...',
       keyword: kw,
       doc_link: null,
       content: null,
-      status: 'processing',
+      status: 'new',
       _temp: true,
       createdTs: now + idx // preserve order of creation
     }));
     setOptimisticRows(prev => [...newTemps, ...prev]);
-    setToast(`Started processing ${count} article${count > 1 ? 's' : ''} for "${kw}"`);
-    setTimeout(() => setToast(null), 3500);
-    // Close modal right away; we will refetch in background
+    // Close modal so the user can add another immediately while this one processes
     setShowAddModal(false);
     try {
       const resp = await fetch('/api/research', {
@@ -854,14 +851,19 @@ export default function Dashboard() {
           }
         }
       }
+      // On success: remove the optimistic placeholders we added for this request
+      setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
+      // Then refetch so the UI shows only finalized rows created by n8n
+      try { await refetch(); } catch (e) { void e; }
       setSendSuccess(true);
+      // Inputs cleanup after success
       setKeywordInput('');
       setKeywordCount('1');
       setBizName('');
       setCity('');
       setProvState('');
       setCallToAction('');
-      // Do not auto refresh here
+      // No Supabase placeholder insert; we rely solely on n8n to persist rows
     } catch (err) {
       // If webhook failed due to balance/capacity, show warning, revert optimistic rows, and reopen Create modal
       const msg = err instanceof Error ? err.message : String(err || '');
@@ -873,11 +875,9 @@ export default function Dashboard() {
       );
       if (isBalanceIssue) {
         setAiWarning('OpenAI has run out of balance. Please top up your OpenAI account.');
-        // Remove the optimistic placeholder rows we just added
+        // Remove optimistic placeholders from this attempt
         setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
-        // Hard reset any remaining temp rows just in case
-        setOptimisticRows(prev => prev.filter(r => !(r as any)._temp));
-        // Also try to clean up any placeholder rows that may have been inserted previously
+        // Also try to clean up any placeholder rows that may have been inserted previously (legacy)
         try {
           await supabase
             .from('Research')
@@ -901,39 +901,22 @@ export default function Dashboard() {
         try { await refetch(); } catch (e) { void e; }
         return; // Skip Supabase fallback insert on balance/capacity errors
       }
-      // Otherwise: Fallback insert placeholder rows into Supabase so the user still sees created items
-      try {
-        const insertRows = Array.from({ length: count }).map(() => ({
-          title: 'Processing...'
-          , keyword: kw,
-          doc_link: null,
-          content: null,
-          status: 'processing',
-          business_name: bizName || null,
-          website: null,
-        }));
-        const { error: insertError } = await supabase
-          .from('Research')
-          .insert(insertRows);
-        if (insertError) {
-          throw insertError;
-        }
-        setSendSuccess(true);
-        setKeywordInput('');
-        setKeywordCount('1');
-        setBizName('');
-        setCity('');
-        setProvState('');
-        setCallToAction('');
-        // Let realtime/refetch pick these up shortly
-      } catch (fallbackErr) {
-        console.error('Create fallback failed:', fallbackErr);
-        setSendError(
-          fallbackErr instanceof Error
-            ? `Create failed: ${fallbackErr.message}`
-            : 'Failed to create articles'
-        );
-      }
+      // Otherwise: do NOT insert any 'processing' rows into Supabase.
+      // Remove optimistic placeholders from this attempt
+      setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
+      setSendError(
+        err instanceof Error
+          ? `Create failed: ${err.message}`
+          : 'Failed to create articles'
+      );
+      // Restore form inputs and reopen Create modal for correction/retry
+      setKeywordInput(kw);
+      setKeywordCount(String(count));
+      setBizName(bizName);
+      setCity(city);
+      setProvState(provState);
+      setCallToAction(callToAction);
+      setShowAddModal(true);
     } finally {
       setSending(false);
     }
