@@ -49,6 +49,12 @@ export default function Dashboard() {
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   // Chat widget moved to its own component (ChatWidget)
   const isBusy = sending;
+
+  const isLikelyHtml = useCallback((value: string) => {
+    const v = (value ?? '').trim();
+    if (!v) return false;
+    return /<\/?[a-z][\s\S]*>/i.test(v);
+  }, []);
   // Track which rows are in the process of sending a Write request
   const [writingIds, setWritingIds] = useState<Set<string>>(() => {
     try {
@@ -65,6 +71,9 @@ export default function Dashboard() {
       return Array.isArray(arr) ? new Set(arr) : new Set();
     } catch { return new Set(); }
   });
+  const [generalizingIds, setGeneralizingIds] = useState<Set<string>>(() => new Set());
+  type GeneralizingMeta = { id?: number | string; title?: string; startedAt?: number };
+  const [generalizingMeta, setGeneralizingMeta] = useState<Record<string, GeneralizingMeta>>(() => ({}));
   // Track rows being deleted dfas
   const [deletingIds, setDeletingIds] = useState<Set<string | number>>(new Set());
   // Modal state for selecting word limit for Write
@@ -574,19 +583,22 @@ export default function Dashboard() {
   // Copy full content from the View Content Modal
   const handleCopyContent = async () => {
     try {
-      const html = String(contentToShow ?? '');
-      const pre = html
-        .replace(/<br\s*\/?>(?=\s*\n?)/gi, '\n')
-        .replace(/<\/(p|div)>/gi, '\n\n')
-        .replace(/<\/(h[1-6])>/gi, '\n\n')
-        .replace(/<li[^>]*>/gi, '• ')
-        .replace(/<\/(li)>/gi, '\n')
-        .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/<[^>]+>/g, '');
-      const text = (() => { const ta = document.createElement('textarea'); ta.innerHTML = pre; return ta.value; })()
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+      const raw = String(contentToShow ?? '');
+      const text = (() => {
+        if (!isLikelyHtml(raw)) return raw.trim();
+        const pre = raw
+          .replace(/<br\s*\/?>(?=\s*\n?)/gi, '\n')
+          .replace(/<\/(p|div)>/gi, '\n\n')
+          .replace(/<\/(h[1-6])>/gi, '\n\n')
+          .replace(/<li[^>]*>/gi, '• ')
+          .replace(/<\/(li)>/gi, '\n')
+          .replace(/<\/?(ul|ol)[^>]*>/gi, '\n')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/<[^>]+>/g, '');
+        return (() => { const ta = document.createElement('textarea'); ta.innerHTML = pre; return ta.value; })()
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      })();
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
       } else {
@@ -738,6 +750,115 @@ export default function Dashboard() {
       // until the workflow actually finishes.
     }
   };
+
+  const handleGeneralizeForArticle = async (article: ResearchArticle) => {
+    if (!article) return;
+    const idKey = String(article.id ?? '');
+    const titleKey = String(article.title ?? '');
+    const startedAt = Date.now();
+    setGeneralizingIds(prev => {
+      const next = new Set(prev);
+      if (idKey) next.add(idKey);
+      if (titleKey) next.add(titleKey);
+      return next;
+    });
+    try {
+      setGeneralizingMeta(prev => ({
+        ...prev,
+        ...(idKey ? { [idKey]: { id: article.id as number | string | undefined, title: article.title, startedAt } } : {}),
+        ...(titleKey ? { [titleKey]: { id: article.id as number | string | undefined, title: article.title, startedAt } } : {}),
+      }));
+    } catch { void 0; }
+    try {
+      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/generalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: article.id,
+          title: article.title,
+          keyword: article.keyword,
+          business_name: (article as unknown as { business_name?: string | null }).business_name ?? null,
+          doc_link: article.doc_link ?? null,
+          content: (article as unknown as { content?: string | null }).content ?? null,
+          status: (article as unknown as { status?: string }).status ?? undefined,
+          action: 'generalize',
+          source: 'dashboard-generalize',
+        }),
+      });
+      if (!resp.ok) {
+        const txt = await resp.text();
+        throw new Error(`Generalize webhook error: ${resp.status} ${txt}`);
+      }
+      const okBodyText = await resp.text();
+      if (okBodyText && okBodyText.trim()) {
+        try {
+          const getFailed = (obj: unknown): string => {
+            if (!obj || typeof obj !== 'object') return '';
+            const rec = obj as Record<string, unknown>;
+            const keys = ['Failed', 'failed', 'FAILURE', 'error'];
+            for (const k of keys) {
+              const v = rec[k];
+              if (typeof v === 'string') return v;
+            }
+            return '';
+          };
+          const json = JSON.parse(okBodyText) as unknown;
+          let failedMsg = '';
+          if (Array.isArray(json)) {
+            failedMsg = getFailed(json[0]);
+          } else {
+            failedMsg = getFailed(json);
+          }
+          if (failedMsg) throw new Error(failedMsg);
+        } catch {
+          const txt = okBodyText.toLowerCase();
+          if (txt.includes('"failed"') || txt.startsWith('failed') || txt.includes('failed:')) {
+            throw new Error(okBodyText);
+          }
+        }
+      }
+      setToast('Generalize started');
+      setTimeout(() => setToast(null), 2500);
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : 'Failed to send generalize request';
+      window.alert(msg);
+      // On error, clear loading state for this row
+      setGeneralizingIds(prev => {
+        const next = new Set(prev);
+        if (idKey) next.delete(idKey);
+        if (titleKey) next.delete(titleKey);
+        return next;
+      });
+      setGeneralizingMeta(prev => { const n = { ...prev }; if (idKey) delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
+    }
+  };
+
+  // Clear generalize loading when the `generalize` column is populated (real-time) or after timeout
+  useEffect(() => {
+    if (generalizingIds.size === 0) return;
+    const now = Date.now();
+    const maxAgeMs = 10 * 60 * 1000;
+    const next = new Set(generalizingIds);
+    for (const a of (articles || [])) {
+      const idKey = String((a as ResearchArticle).id ?? '');
+      const titleKey = String((a as ResearchArticle).title ?? '');
+      const generic = String((a as ResearchArticle).generalize ?? '').trim();
+      if (generic) {
+        if (next.has(idKey)) next.delete(idKey);
+        if (next.has(titleKey)) next.delete(titleKey);
+        setGeneralizingMeta(prev => { const n = { ...prev }; delete n[idKey]; delete n[titleKey]; return n; });
+      }
+    }
+    for (const key of Array.from(next)) {
+      const meta = generalizingMeta[key];
+      if (meta && typeof meta.startedAt === 'number' && (now - meta.startedAt) > maxAgeMs) {
+        next.delete(key);
+        setGeneralizingMeta(prev => { const n = { ...prev }; delete n[key]; return n; });
+      }
+    }
+    if (next.size !== generalizingIds.size) setGeneralizingIds(next);
+  }, [articles, generalizingIds, generalizingMeta]);
 
   // Send keyword request directly to the provided webhook
   const handleSendKeyword = async (e: FormEvent) => {
@@ -1476,12 +1597,13 @@ export default function Dashboard() {
     return (
       <button
         type="button"
-        onClick={() => {
+        onClick={(e) => {
+          e.stopPropagation();
           setContentTitle(title);
           setContentToShow(htmlForModal);
           setShowContentModal(true);
         }}
-        className="text-indigo-600 hover:underline text-sm font-medium"
+        className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-sm font-semibold text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-200"
       >
         View content
       </button>
@@ -2121,10 +2243,16 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="overflow-auto pr-1">
-              <div
-                className="prose prose-lg max-w-none text-gray-900 leading-relaxed prose-p:my-4 prose-h2:mt-6 prose-h2:mb-3 prose-h2:text-gray-900 prose-h2:font-extrabold prose-strong:font-semibold prose-ul:my-4 prose-ol:my-4 prose-li:my-1 prose-a:text-blue-600 prose-a:underline"
-                dangerouslySetInnerHTML={{ __html: contentToShow }}
-              />
+              {isLikelyHtml(String(contentToShow ?? '')) ? (
+                <div
+                  className="prose prose-lg max-w-none text-gray-900 leading-relaxed prose-p:my-4 prose-h2:mt-6 prose-h2:mb-3 prose-h2:text-gray-900 prose-h2:font-extrabold prose-strong:font-semibold prose-ul:my-4 prose-ol:my-4 prose-li:my-1 prose-a:text-blue-600 prose-a:underline"
+                  dangerouslySetInnerHTML={{ __html: contentToShow }}
+                />
+              ) : (
+                <pre className="whitespace-pre-wrap break-words text-gray-900 leading-relaxed text-sm font-normal">
+                  {String(contentToShow ?? '')}
+                </pre>
+              )}
             </div>
           </div>
         </div>
@@ -2805,6 +2933,53 @@ export default function Dashboard() {
                                 {getStatusBadge((article).status)}
                               </div>
                             )}
+                            {(() => {
+                              const docLink = String((article as ResearchArticle).doc_link ?? '').trim();
+                              const content = String((article as ResearchArticle).content ?? '').trim();
+                              const name = String((article as ResearchArticle).business_name ?? '').trim();
+                              const generic = String((article as ResearchArticle).generalize ?? '').trim();
+                              const showGeneralize = !!docLink && docLink.toUpperCase() !== 'EMPTY' && !!content && !!name;
+                              const showViewGeneric = !!generic;
+                              if (!showGeneralize && !showViewGeneric) return null;
+                              const isGeneralizing = generalizingIds.has(String((article as ResearchArticle).id ?? '')) || generalizingIds.has(String((article as ResearchArticle).title ?? ''));
+
+                              if (showViewGeneric) {
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setContentTitle(`${String((article as ResearchArticle).title ?? '').trim() || 'Generic content'}`);
+                                      setContentToShow(generic);
+                                      setShowContentModal(true);
+                                    }}
+                                    className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
+                                    title="View Generic Content"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                    <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[180px] group-hover:opacity-100 transition-all duration-200 whitespace-nowrap font-semibold text-sm ml-0 group-hover:ml-2">View Generic Content</span>
+                                  </button>
+                                );
+                              }
+
+                              if (!showGeneralize) return null;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); void handleGeneralizeForArticle(article as ResearchArticle); }}
+                                  disabled={isGeneralizing}
+                                  className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-emerald-600 to-green-700 hover:from-emerald-700 hover:to-green-800 rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
+                                  title="Generalize"
+                                >
+                                  {isGeneralizing ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Sparkles className="w-4 h-4" />
+                                  )}
+                                  <span className="max-w-0 overflow-hidden opacity-0 group-hover:max-w-[140px] group-hover:opacity-100 transition-all duration-200 whitespace-nowrap font-semibold text-sm ml-0 group-hover:ml-2">Generalize</span>
+                                </button>
+                              );
+                            })()}
                             {/* Delete button for any non-temp row */}
                             <button
                               type="button"

@@ -24,7 +24,7 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
 
       let query = supabase
         .from('Research')
-        .select('id, title, keyword, doc_link, content, website, business_name, status', { count: 'exact' })
+        .select('id, title, keyword, doc_link, content, generalize, website, business_name, status', { count: 'exact' })
         .order('id', { ascending: false });
 
       const trimmedSearch = (searchTerm ?? '').trim();
