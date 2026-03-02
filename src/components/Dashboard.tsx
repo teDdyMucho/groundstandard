@@ -6,11 +6,16 @@ import type { ResearchArticle } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 
 export default function Dashboard() {
-  const { articles, loading, error, refetch } = useResearchData();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const { articles, totalCount, loading, error, refetch } = useResearchData({
+    page: currentPage,
+    pageSize: itemsPerPage,
+    searchTerm,
+    statusFilter
+  });
   const [selectedIds, setSelectedIds] = useState<Set<number | string>>(new Set());
 //fdsafa
   // Back-to-top visibility
@@ -37,6 +42,9 @@ export default function Dashboard() {
   const [contentToShow, setContentToShow] = useState<string>('');
   const [contentTitle, setContentTitle] = useState<string>('');
   const [copied, setCopied] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<Array<number | string>>([]);
+  const [deleteTargetTitle, setDeleteTargetTitle] = useState<string>('');
   const [toast, setToast] = useState<string | null>(null);
   const [aiWarning, setAiWarning] = useState<string | null>(null);
   // Chat widget moved to its own component (ChatWidget)
@@ -462,6 +470,8 @@ export default function Dashboard() {
     }
   };
 
+  const isDeleteModalDeleting = deleteTargetIds.some((id) => deletingIds.has(id));
+
   const deleteTag = useCallback(async (id: number, name?: string) => {
     setDeletingTagId(id);
     try {
@@ -618,7 +628,7 @@ export default function Dashboard() {
       ...(titleKey ? { [titleKey]: { id: article.id as number | string | undefined, title: article.title, startedAt, prevDocLink, prevContent } } : {}),
     }));
     try {
-      const resp = await fetch('/api/write', {
+      const resp = await fetch('https://groundstandard.app.n8n.cloud/webhook/rewrite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1099,61 +1109,112 @@ export default function Dashboard() {
     });
   };
 
-// Delete an article by id from Supabase
-const handleDeleteArticle = async (id: number | string, title?: string) => {
-  if (id === undefined || id === null) return;
-  const confirmed = window.confirm(`Delete this item${title ? `: "${title}"` : ''}? This cannot be undone.`);
-  // ... (rest of the code remains the same)
-  if (!confirmed) return;
-  setDeletingIds(prev => new Set(prev).add(id));
-  try {
-    const { error: delError } = await supabase
-      .from('Research')
-      .delete()
-      .eq('id', id);
-    if (delError) throw delError;
-    // Clear any pending write/rewrite and meta for this id/title so placeholders don't linger
-    const idKey = String(id ?? '');
-    // If title isn't provided, try to find it from current articles
-    const titleKey = String(title ?? (articles?.find(a => String(a.id) === idKey)?.title ?? ''));
-    setWritingIds(prev => {
-      const next = new Set(prev);
-      next.delete(idKey);
-      if (titleKey) next.delete(titleKey);
-      return next;
-    });
-    setRewritingIds(prev => {
-      const next = new Set(prev);
-      next.delete(idKey);
-      if (titleKey) next.delete(titleKey);
-      return next;
-    });
-    setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
-    // Also drop any optimistic placeholders that match this title's keyword if present
-    setOptimisticRows(prev => prev.filter(r => r.id !== idKey));
-  } catch (err) {
-    console.error('Delete failed', err);
-    const msg = err instanceof Error ? err.message : 'Failed to delete row';
-    window.alert(msg);
-  } finally {
+  const openDeleteModalSingle = (id: number | string, title?: string) => {
+    if (id === undefined || id === null) return;
+    setDeleteTargetIds([id]);
+    setDeleteTargetTitle(String(title ?? ''));
+    setShowDeleteModal(true);
+  };
+
+  const openDeleteModalBulk = (ids: Array<number | string>) => {
+    const cleaned = (ids || []).filter((id) => id !== undefined && id !== null);
+    if (cleaned.length === 0) return;
+    setDeleteTargetIds(cleaned);
+    setDeleteTargetTitle('');
+    setShowDeleteModal(true);
+  };
+
+  const executeDeleteSingle = async (id: number | string, title?: string) => {
+    setDeletingIds(prev => new Set(prev).add(id));
+    try {
+      const { error: delError } = await supabase
+        .from('Research')
+        .delete()
+        .eq('id', id);
+      if (delError) throw delError;
+      const idKey = String(id ?? '');
+      const titleKey = String(title ?? (articles?.find(a => String(a.id) === idKey)?.title ?? ''));
+      setWritingIds(prev => {
+        const next = new Set(prev);
+        next.delete(idKey);
+        if (titleKey) next.delete(titleKey);
+        return next;
+      });
+      setRewritingIds(prev => {
+        const next = new Set(prev);
+        next.delete(idKey);
+        if (titleKey) next.delete(titleKey);
+        return next;
+      });
+      setWritingMeta(prev => { const n = { ...prev }; delete n[idKey]; if (titleKey) delete n[titleKey]; return n; });
+      setOptimisticRows(prev => prev.filter(r => r.id !== idKey));
+    } catch (err) {
+      console.error('Delete failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete row';
+      window.alert(msg);
+      throw err;
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  const executeBulkDelete = async (idsToDelete: Array<number | string>) => {
     setDeletingIds(prev => {
       const next = new Set(prev);
-      next.delete(id);
+      idsToDelete.forEach(id => next.add(id));
       return next;
     });
-  }
-};
+    try {
+      const { error: delError } = await supabase
+        .from('Research')
+        .delete()
+        .in('id', idsToDelete);
+      if (delError) throw delError;
+      setSelectedIds(new Set());
+    } catch (err) {
+      console.error('Bulk delete failed', err);
+      const msg = err instanceof Error ? err.message : 'Failed to delete selected rows';
+      window.alert(msg);
+      throw err;
+    } finally {
+      setDeletingIds(prev => {
+        const next = new Set(prev);
+        idsToDelete.forEach(id => next.delete(id));
+        return next;
+      });
+    }
+  };
+
+  const confirmDelete = async () => {
+    const ids = deleteTargetIds;
+    if (!ids || ids.length === 0) return;
+    try {
+      if (ids.length === 1) {
+        await executeDeleteSingle(ids[0], deleteTargetTitle || undefined);
+      } else {
+        await executeBulkDelete(ids);
+      }
+      setShowDeleteModal(false);
+      setDeleteTargetIds([]);
+      setDeleteTargetTitle('');
+    } catch {
+      void 0;
+    }
+  };
 
   const filteredArticles = useMemo(() => {
     // Real articles may still be loading; show placeholders for writing rows from meta
     const realArticles = articles || [];
-    // Start with real articles
-    const real = realArticles.filter(article => {
-      const q = (searchTerm || '').toLowerCase();
-      const t = (article.title || '').toLowerCase();
-      const k = (article.keyword || '').toLowerCase();
-      const b = String((article as ResearchArticle).business_name || '').toLowerCase();
-      const matchesSearch = t.includes(q) || k.includes(q) || b.includes(q);
+    const loweredSearch = searchTerm.toLowerCase();
+    const real = realArticles.filter((article) => {
+      const matchesSearch =
+        article.title.toLowerCase().includes(loweredSearch) ||
+        article.keyword.toLowerCase().includes(loweredSearch) ||
+        (article.business_name ?? '').toLowerCase().includes(loweredSearch);
       const matchesStatus = statusFilter === 'all' || article.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
@@ -1203,9 +1264,13 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
 
   // Page does not auto-jump; user controls pagination
 
-  const totalPages = Math.ceil(filteredArticles.length / itemsPerPage);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage));
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedArticles = filteredArticles.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedArticles = filteredArticles;
 
   const toggleSelectAllOnPage = () => {
     const idsOnPage = paginatedArticles
@@ -1239,31 +1304,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
   const handleBulkDelete = async () => {
     const idsToDelete = Array.from(selectedIds).filter(id => id !== undefined && id !== null);
     if (idsToDelete.length === 0) return;
-    const confirmed = window.confirm(`Delete ${idsToDelete.length} selected item${idsToDelete.length > 1 ? 's' : ''}? This cannot be undone.`);
-    if (!confirmed) return;
-    setDeletingIds(prev => {
-      const next = new Set(prev);
-      idsToDelete.forEach(id => next.add(id));
-      return next;
-    });
-    try {
-      const { error: delError } = await supabase
-        .from('Research')
-        .delete()
-        .in('id', idsToDelete);
-      if (delError) throw delError;
-      setSelectedIds(new Set());
-    } catch (err) {
-      console.error('Bulk delete failed', err);
-      const msg = err instanceof Error ? err.message : 'Failed to delete selected rows';
-      window.alert(msg);
-    } finally {
-      setDeletingIds(prev => {
-        const next = new Set(prev);
-        idsToDelete.forEach(id => next.delete(id));
-        return next;
-      });
-    }
+    openDeleteModalBulk(idsToDelete);
   };
 
   // Prune optimistic placeholders as real rows arrive for a given keyword
@@ -1293,13 +1334,13 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
   const stats = useMemo(() => {
     if (!articles) return { total: 0, newCount: 0, withLinks: 0, withoutLinks: 0 };
     
-    const total = articles.length;
+    const total = totalCount;
     const newCount = articles.filter(a => a.status === 'new').length;
     const withLinks = articles.filter(a => a.doc_link && a.doc_link.trim() !== '').length;
     const withoutLinks = total - withLinks;
 
     return { total, newCount, withLinks, withoutLinks };
-  }, [articles]);
+  }, [articles, totalCount]);
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
@@ -1673,6 +1714,77 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => {
+              if (isDeleteModalDeleting) return;
+              setShowDeleteModal(false);
+              setDeleteTargetIds([]);
+              setDeleteTargetTitle('');
+            }}
+          />
+          <div className="relative bg-white w-full max-w-lg mx-auto rounded-lg shadow-lg border p-6 z-10">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Confirm Delete</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isDeleteModalDeleting) return;
+                  setShowDeleteModal(false);
+                  setDeleteTargetIds([]);
+                  setDeleteTargetTitle('');
+                }}
+                className="p-2 rounded hover:bg-gray-100 text-gray-600"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-5">
+              <p className="text-sm text-gray-700 leading-relaxed">
+                {deleteTargetIds.length <= 1
+                  ? `Delete this item${deleteTargetTitle ? `: "${deleteTargetTitle}"` : ''}? This cannot be undone.`
+                  : `Delete ${deleteTargetIds.length} selected items? This cannot be undone.`}
+              </p>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  disabled={isDeleteModalDeleting}
+                  onClick={() => {
+                    setShowDeleteModal(false);
+                    setDeleteTargetIds([]);
+                    setDeleteTargetTitle('');
+                  }}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDelete}
+                  disabled={isDeleteModalDeleting}
+                  className="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                >
+                  {isDeleteModalDeleting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    'Delete'
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -2696,7 +2808,7 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                             {/* Delete button for any non-temp row */}
                             <button
                               type="button"
-                              onClick={() => handleDeleteArticle((article).id, (article).title)}
+                              onClick={() => openDeleteModalSingle((article).id, (article).title)}
                               disabled={deletingIds.has((article).id)}
                               className="group inline-flex items-center justify-center h-10 min-w-[40px] px-0 group-hover:px-3 text-white bg-gradient-to-r from-gray-700 to-gray-800 hover:from-gray-800 hover:to-gray-900 rounded-xl shadow-md hover:shadow-lg transition-all duration-200 disabled:opacity-50"
                               title="Delete"
@@ -2745,8 +2857,8 @@ const handleDeleteArticle = async (id: number | string, title?: string) => {
                   <div className="bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm">
                     <p className="text-sm text-gray-600">
                       Showing <span className="font-bold text-black">{startIndex + 1}</span> to{' '}
-                      <span className="font-bold text-black">{Math.min(startIndex + itemsPerPage, filteredArticles.length)}</span> of{' '}
-                      <span className="font-bold text-blue-600">{filteredArticles.length}</span> results
+                      <span className="font-bold text-black">{Math.min(startIndex + itemsPerPage, totalCount)}</span> of{' '}
+                      <span className="font-bold text-blue-600">{totalCount}</span> results
                     </p>
                   </div>
                   <div>
