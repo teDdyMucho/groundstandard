@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { supabase, ResearchArticle } from '../lib/supabase';
+﻿import { useState, useEffect } from 'react';
+import { supabase, ResearchArticle, isSupabaseConfigured } from '../lib/supabase';
 
 type UseResearchDataParams = {
   page: number;
@@ -19,12 +19,19 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
       setLoading(true);
       setError(null);
 
+      if (!isSupabaseConfigured) {
+        setArticles([]);
+        setTotalCount(0);
+        setError('Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY and restart the dev server.');
+        return;
+      }
+
       const from = Math.max(0, (page - 1) * pageSize);
       const to = Math.max(from, from + pageSize - 1);
 
       let query = supabase
         .from('Research')
-        .select('id, title, keyword, doc_link, content, generalize, website, business_name, status', { count: 'exact' })
+        .select('id, title, keyword, doc_link, status, content, word_limit, business_name, city, state, call_action, website, research, addkeyword, generalize', { count: 'exact' })
         .order('id', { ascending: false });
 
       const trimmedSearch = (searchTerm ?? '').trim();
@@ -58,7 +65,14 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
   useEffect(() => {
     fetchArticles();
 
-    // Set up real-time subscription
+    if (!isSupabaseConfigured) {
+      return;
+    }
+
+    const pollId = window.setInterval(() => {
+      fetchArticles();
+    }, 8000);
+
     const subscription = supabase
       .channel('research_changes')
       .on('postgres_changes', 
@@ -69,12 +83,13 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
         }, 
         (payload) => {
           console.log('Real-time update:', payload);
-          fetchArticles(); // Refetch data on any change
+          fetchArticles();
         }
       )
       .subscribe();
 
     return () => {
+      window.clearInterval(pollId);
       subscription.unsubscribe();
     };
   }, [page, pageSize, searchTerm, statusFilter]);

@@ -6,35 +6,17 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api/rewrite': {
-        target: 'https://groundstandard.app.n8n.cloud',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/rewrite/, '/webhook/rewrite'),
-      },
       '/api/research': {
-        target: 'https://groundstandard.app.n8n.cloud',
+        target: 'https://primary-production-a010.up.railway.app',
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path.replace(/^\/api\/research/, '/webhook/Research'),
+        rewrite: (path) => path.replace(/^\/api\/research/, '/webhook/research'),
       },
       '/api/write': {
-        target: 'https://groundstandard.app.n8n.cloud',
+        target: 'https://primary-production-a010.up.railway.app',
         changeOrigin: true,
         secure: true,
-        rewrite: (path) => path.replace(/^\/api\/write/, '/webhook/Write'),
-      },
-      '/api/tag': {
-        target: 'https://groundstandard.app.n8n.cloud',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/tag/, '/webhook/Tag'),
-      },
-      '/api/chat-bot': {
-        target: 'https://groundstandard.app.n8n.cloud',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/chat-bot/, '/webhook/chat-bot'),
+        rewrite: (path) => path.replace(/^\/api\/write/, '/webhook/write'),
       },
     },
   },

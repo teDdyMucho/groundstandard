@@ -185,7 +185,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="group flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 transition-all duration-300 hover:scale-105"
+          className="group flex items-center gap-3 px-6 py-4 rounded-2xl shadow-2xl bg-gradient-to-r from-peacock-600 to-peacock-700 text-white hover:from-peacock-700 hover:to-peacock-800 transition-all duration-300 hover:scale-105"
           aria-label="Open AI Assistant"
         >
           <div className="w-8 h-8 bg-white/20 rounded-xl flex items-center justify-center">
@@ -199,9 +199,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
       ) : (
         <div className="bg-white/95 backdrop-blur-sm border border-gray-200 rounded-2xl shadow-2xl overflow-hidden resize flex flex-col" style={{ width: '48vw', height: '60vh', minWidth: 600, minHeight: 360, maxWidth: '90vw', maxHeight: '85vh', resize: 'both' }}>
           {/* Modern Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-black to-gray-800">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-peacock-600 to-peacock-500">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center">
+              <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
               <div>
@@ -253,8 +253,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                       <div className={`flex items-start gap-3 max-w-[85%] ${m.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                         <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
                           m.role === 'user' 
-                            ? 'bg-gradient-to-br from-blue-600 to-blue-700' 
-                            : 'bg-gradient-to-br from-red-600 to-red-700'
+                            ? 'bg-gradient-to-br from-peacock-600 to-peacock-700' 
+                            : 'bg-gradient-to-br from-peacock-500 to-peacock-600'
                         }`}>
                           {m.role === 'user' ? (
                             <User className="w-4 h-4 text-white" />
@@ -264,7 +264,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                         </div>
                         <div className={`px-4 py-3 rounded-2xl shadow-sm ${
                           m.role === 'user' 
-                            ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white' 
+                            ? 'bg-gradient-to-r from-peacock-600 to-peacock-700 text-white' 
                             : 'bg-white border border-gray-200 text-black'
                         }`}>
                           {isTyping ? (
@@ -277,7 +277,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                             <pre className="whitespace-pre-wrap break-words text-sm">{m.text}</pre>
                           )}
                           {!isTyping && (
-                            <div className={`mt-2 text-xs ${m.role === 'user' ? 'text-blue-100' : 'text-gray-500'}`}>{ts}</div>
+                            <div className={`mt-2 text-xs ${m.role === 'user' ? 'text-peacock-100' : 'text-gray-500'}`}>{ts}</div>
                           )}
                         </div>
                       </div>
@@ -291,13 +291,13 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Ask me to write an article..."
-                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all duration-200 placeholder-gray-500 text-black"
+                  className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-peacock-500/20 focus:border-peacock-600 transition-all duration-200 placeholder-gray-500 text-black"
                   disabled={sending}
                 />
                 <button
                   type="submit"
                   disabled={sending || !input.trim()}
-                  className="inline-flex items-center justify-center w-12 h-12 rounded-xl text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
+                  className="inline-flex items-center justify-center w-12 h-12 rounded-xl text-white bg-gradient-to-r from-peacock-600 to-peacock-700 hover:from-peacock-700 hover:to-peacock-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
                 >
                   <Send className={`w-5 h-5 ${sending ? 'animate-pulse' : ''}`} />
                 </button>
@@ -308,7 +308,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
             <div className="w-1/2 flex flex-col border-l border-gray-200 bg-gradient-to-b from-white to-gray-50">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-gradient-to-br from-red-600 to-red-700 rounded-lg flex items-center justify-center">
+                  <div className="w-8 h-8 bg-gradient-to-br from-peacock-600 to-peacock-700 rounded-lg flex items-center justify-center">
                     <Download className="w-4 h-4 text-white" />
                   </div>
                   <div>
@@ -330,7 +330,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ webhookUrl }) => {
                     type="button"
                     onClick={downloadAsWord}
                     disabled={!latestArticle}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-peacock-600 to-peacock-700 hover:from-peacock-700 hover:to-peacock-800 disabled:opacity-50 shadow-lg hover:shadow-xl transition-all duration-200"
                   >
                     <Download className="w-4 h-4" />
                     Download
