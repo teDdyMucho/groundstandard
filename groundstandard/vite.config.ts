@@ -14,7 +14,6 @@ export default defineConfig({
       },
       '/api/research': {
         target: 'https://groundstandard.app.n8n.cloud',
-        
         changeOrigin: true,
         secure: true,
         rewrite: (path) => path.replace(/^\/api\/research/, '/webhook/Research'),
