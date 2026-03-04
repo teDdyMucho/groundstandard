@@ -421,10 +421,7 @@ export default function Dashboard() {
     try {
       setTagLoading(true);
       setTagError(null);
-      const { data, error } = await supabase
-        .from('tag')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data, error } = await supabase.rpc('rpc_tag_list');
       if (error) throw error;
       const rows = (data as TagRow[]) || [];
       setTagRows(rows);
@@ -489,7 +486,11 @@ export default function Dashboard() {
     if (!name) return;
     setSavingTagId(editingTagId);
     try {
-      const { error } = await supabase.from('tag').update({ tag: name, color }).eq('id', editingTagId);
+      const { error } = await supabase.rpc('rpc_tag_update', {
+        p_id: Number(editingTagId),
+        p_tag: name,
+        p_color: color,
+      });
       if (error) throw error;
       await fetchTags();
       cancelEditTag();
@@ -506,7 +507,9 @@ export default function Dashboard() {
   const deleteTag = useCallback(async (id: number, name?: string) => {
     setDeletingTagId(id);
     try {
-      const { error } = await supabase.from('tag').delete().eq('id', id);
+      const { error } = await supabase.rpc('rpc_tag_delete', {
+        p_id: Number(id),
+      });
       if (error) throw error;
       await fetchTags();
       // Prune this tag from all rows locally if name is provided
