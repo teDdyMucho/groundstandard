@@ -416,6 +416,7 @@ export default function Dashboard() {
   const [savingTagId, setSavingTagId] = useState<number | null>(null);
   const [deletingTagId, setDeletingTagId] = useState<number | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [confirmDeleteName, setConfirmDeleteName] = useState<string>('');
 
   const fetchTags = useCallback(async () => {
     try {
@@ -2378,6 +2379,33 @@ export default function Dashboard() {
         {showTagModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setShowTagModal(false)}>
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-0 border border-gray-200 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              {confirmDeleteId != null && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setConfirmDeleteId(null); setConfirmDeleteName(''); }}>
+                  <div className="w-full max-w-md rounded-2xl bg-white border border-gray-200 shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+                    <div className="text-base font-extrabold text-gray-900">Delete tag?</div>
+                    <div className="mt-1 text-sm text-gray-600 break-words">
+                      Are you sure you want to delete <span className="font-bold text-gray-900">{confirmDeleteName || 'this tag'}</span>?
+                    </div>
+                    <div className="mt-4 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setConfirmDeleteId(null); setConfirmDeleteName(''); }}
+                        className="px-3 py-2 text-sm font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl border border-gray-200 shadow-sm"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => { await deleteTag(confirmDeleteId, confirmDeleteName || undefined); }}
+                        disabled={deletingTagId === confirmDeleteId}
+                        className="px-3 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-sm disabled:opacity-50"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="px-6 pt-5 pb-4 bg-gradient-to-r from-blue-600/5 via-transparent to-rose-600/5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -2526,7 +2554,7 @@ export default function Dashboard() {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => setConfirmDeleteId(r.id)}
+                                        onClick={() => { setConfirmDeleteId(r.id); setConfirmDeleteName(r.tag || ''); }}
                                         className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm"
                                       >
                                         Delete
