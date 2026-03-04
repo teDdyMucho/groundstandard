@@ -22,31 +22,28 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
       const from = Math.max(0, (page - 1) * pageSize);
       const to = Math.max(from, from + pageSize - 1);
 
-      let query = supabase
-        .from('Research')
-        .select('id, title, keyword, doc_link, content, generalize, website, business_name, status', { count: 'exact' })
-        .order('id', { ascending: false });
-
       const trimmedSearch = (searchTerm ?? '').trim();
-      if (trimmedSearch) {
-        const escaped = trimmedSearch.replace(/%/g, '\\%').replace(/_/g, '\\_');
-        query = query.or(
-          `title.ilike.%${escaped}%,keyword.ilike.%${escaped}%,business_name.ilike.%${escaped}%`
-        );
-      }
+      const searchParam = trimmedSearch ? trimmedSearch : null;
+      const statusParam = statusFilter && statusFilter !== 'all' ? statusFilter : null;
 
-      if (statusFilter && statusFilter !== 'all') {
-        query = query.eq('status', statusFilter);
-      }
+      const [{ data: listData, error: listError }, { data: countData, error: countError }] = await Promise.all([
+        supabase.rpc('rpc_research_list', {
+          p_from: from,
+          p_to: to,
+          p_search: searchParam,
+          p_status: statusParam,
+        }),
+        supabase.rpc('rpc_research_count', {
+          p_search: searchParam,
+          p_status: statusParam,
+        }),
+      ]);
 
-      const { data, error: fetchError, count } = await query.range(from, to);
+      if (listError) throw listError;
+      if (countError) throw countError;
 
-      if (fetchError) {
-        throw fetchError;
-      }
-
-      setArticles(data || []);
-      setTotalCount(count ?? 0);
+      setArticles((listData as ResearchArticle[]) || []);
+      setTotalCount(typeof countData === 'number' ? countData : 0);
     } catch (err) {
       console.error('Error fetching articles:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch articles');
@@ -58,18 +55,18 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
   useEffect(() => {
     fetchArticles();
 
-    // Set up real-time subscription
     const subscription = supabase
       .channel('research_changes')
-      .on('postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'Research' 
-        }, 
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'Research',
+        },
         (payload) => {
           console.log('Real-time update:', payload);
-          fetchArticles(); // Refetch data on any change
+          fetchArticles();
         }
       )
       .subscribe();
@@ -84,6 +81,6 @@ export function useResearchData({ page, pageSize, searchTerm, statusFilter }: Us
     totalCount,
     loading,
     error,
-    refetch: fetchArticles
+    refetch: fetchArticles,
   };
 }

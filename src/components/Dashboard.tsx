@@ -20,12 +20,34 @@ export default function Dashboard() {
 //fdsafa
   // Back-to-top visibility
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const statusDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
+  const statusOptions = useMemo(() => (
+    [
+      { value: 'all', label: 'All Statuses' },
+      { value: 'new', label: 'New' },
+      { value: 'writing', label: 'Writing' },
+      { value: 'Used', label: 'Completed' },
+      { value: 'processing', label: 'Processing' },
+    ]
+  ), []);
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
     window.addEventListener('scroll', onScroll);
     onScroll();
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+  useEffect(() => {
+    if (!statusDropdownOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = statusDropdownRef.current;
+      const target = e.target as Node | null;
+      if (!el || !target) return;
+      if (!el.contains(target)) setStatusDropdownOpen(false);
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [statusDropdownOpen]);
   // Modal state for sending a Keyword to webhook
   const [showAddModal, setShowAddModal] = useState(false);
   const [keywordInput, setKeywordInput] = useState('');
@@ -991,12 +1013,9 @@ export default function Dashboard() {
         setOptimisticRows(prev => prev.filter(r => !(newTemps as any[]).some(t => t.id === (r as any).id)));
         // Also try to clean up any placeholder rows that may have been inserted previously (legacy)
         try {
-          await supabase
-            .from('Research')
-            .delete()
-            .eq('status', 'processing')
-            .eq('keyword', kw)
-            .is('doc_link', null);
+          await supabase.rpc('rpc_research_cleanup_processing', {
+            p_keyword: kw,
+          });
         } catch (e) { console.warn('Cleanup delete failed (safe to ignore):', e); }
         // Restore form inputs and reopen the Create modal
         setKeywordInput(kw);
@@ -1248,10 +1267,9 @@ export default function Dashboard() {
   const executeDeleteSingle = async (id: number | string, title?: string) => {
     setDeletingIds(prev => new Set(prev).add(id));
     try {
-      const { error: delError } = await supabase
-        .from('Research')
-        .delete()
-        .eq('id', id);
+      const { error: delError } = await supabase.rpc('rpc_research_delete', {
+        p_id: Number(id),
+      });
       if (delError) throw delError;
       const idKey = String(id ?? '');
       const titleKey = String(title ?? (articles?.find(a => String(a.id) === idKey)?.title ?? ''));
@@ -1290,10 +1308,9 @@ export default function Dashboard() {
       return next;
     });
     try {
-      const { error: delError } = await supabase
-        .from('Research')
-        .delete()
-        .in('id', idsToDelete);
+      const { error: delError } = await supabase.rpc('rpc_research_bulk_delete', {
+        p_ids: idsToDelete.map((v) => Number(v)),
+      });
       if (delError) throw delError;
       setSelectedIds(new Set());
     } catch (err) {
@@ -2528,7 +2545,7 @@ export default function Dashboard() {
         )}
 
         {/* Enhanced Search & Filter Section */}
-        <div className="bg-gradient-to-r from-white via-blue-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg mb-8 overflow-hidden">
+        <div className="bg-gradient-to-r from-white via-blue-50/30 to-white border-2 border-gray-100 rounded-3xl shadow-lg mb-8 overflow-visible">
           <div className="bg-gradient-to-r from-blue-600/5 via-transparent to-red-600/5 p-1">
             <div className="bg-white rounded-[20px] p-6">
               <div className="flex flex-col lg:flex-row gap-6 items-start lg:items-center justify-between">
@@ -2565,19 +2582,51 @@ export default function Dashboard() {
                     <Filter className="w-4 h-4 text-blue-600" />
                     <span className="text-sm font-bold text-gray-700">Filter:</span>
                   </div>
-                  <div className="relative group">
+                  <div ref={statusDropdownRef} className="relative group">
                     <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-red-600/20 rounded-xl blur opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                    <select
-                      value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
-                      className="relative px-4 py-2.5 bg-gradient-to-r from-gray-50 to-blue-50/50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 text-black font-bold min-w-[140px] shadow-sm hover:shadow-md"
+                    <button
+                      type="button"
+                      onClick={() => setStatusDropdownOpen(v => !v)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setStatusDropdownOpen(false);
+                      }}
+                      className="relative w-full inline-flex items-center justify-between px-4 py-2.5 bg-gradient-to-r from-gray-50 to-blue-50/50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-300 text-black font-bold min-w-[160px] shadow-sm hover:shadow-md"
+                      aria-haspopup="listbox"
+                      aria-expanded={statusDropdownOpen}
                     >
-                      <option value="all">All Statuses</option>
-                      <option value="new">New</option>
-                      <option value="writing">Writing</option>
-                      <option value="Used">Completed</option>
-                      <option value="processing">Processing</option>
-                    </select>
+                      <span className="truncate">
+                        {(statusOptions.find(o => o.value === statusFilter)?.label) || 'All Statuses'}
+                      </span>
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-gray-700 ml-3">
+                        <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 1 1 1.06 1.06l-4.24 4.24a.75.75 0 0 1-1.06 0L5.21 8.29a.75.75 0 0 1 .02-1.08Z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                    {statusDropdownOpen && (
+                      <div className="absolute right-0 mt-2 w-56 rounded-xl border border-gray-200 bg-white shadow-xl z-50 overflow-hidden">
+                        <div className="py-1" role="listbox" aria-label="Status filter">
+                          {statusOptions.map(opt => {
+                            const selected = opt.value === statusFilter;
+                            return (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => { setStatusFilter(opt.value); setStatusDropdownOpen(false); }}
+                                className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors ${selected ? 'bg-blue-50 text-blue-800' : 'text-gray-800 hover:bg-gray-50'}`}
+                                role="option"
+                                aria-selected={selected}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span>{opt.label}</span>
+                                  {selected && (
+                                    <CheckCircle className="w-4 h-4 text-blue-700" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
