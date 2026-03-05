@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Dashboard from './components/Dashboard';
+import FormSubmission from './components/FormSubmission';
 import LaunchPad from './components/LaunchPad';
 import LoginForm from './components/LoginForm';
 import { supabase } from './lib/supabase';
@@ -8,7 +9,7 @@ import type { Session } from '@supabase/supabase-js';
 function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [initializing, setInitializing] = useState(true);
-  const [hasLaunchedTool, setHasLaunchedTool] = useState(() => sessionStorage.getItem('gs_has_launched_tool_v1') === '1');
+  const [selectedTool, setSelectedTool] = useState<string | null>(() => sessionStorage.getItem('gs_selected_tool_v1'));
 
   useEffect(() => {
     let mounted = true;
@@ -17,8 +18,8 @@ function App() {
       const forceLogin = sessionStorage.getItem('gs_force_login_v1') === '1';
       setSession(forceLogin ? null : data.session);
       if (!data.session || forceLogin) {
-        sessionStorage.removeItem('gs_has_launched_tool_v1');
-        setHasLaunchedTool(false);
+        sessionStorage.removeItem('gs_selected_tool_v1');
+        setSelectedTool(null);
       }
       setInitializing(false);
     });
@@ -26,8 +27,8 @@ function App() {
       const forceLogin = sessionStorage.getItem('gs_force_login_v1') === '1';
       setSession(forceLogin ? null : nextSession);
       if (!nextSession || forceLogin) {
-        sessionStorage.removeItem('gs_has_launched_tool_v1');
-        setHasLaunchedTool(false);
+        sessionStorage.removeItem('gs_selected_tool_v1');
+        setSelectedTool(null);
       }
       setInitializing(false);
     });
@@ -50,26 +51,32 @@ function App() {
     return <LoginForm />;
   }
 
-  if (!hasLaunchedTool) {
+  if (!selectedTool) {
     return (
       <LaunchPad
         domainLabel={typeof window !== 'undefined' ? window.location.host : 'groundstandard.netlify.app'}
         onLaunchArticleGenerator={() => {
-          sessionStorage.setItem('gs_has_launched_tool_v1', '1');
-          setHasLaunchedTool(true);
+          sessionStorage.setItem('gs_selected_tool_v1', 'article');
+          setSelectedTool('article');
+        }}
+        onLaunchFormSubmission={() => {
+          sessionStorage.setItem('gs_selected_tool_v1', 'form_submission');
+          setSelectedTool('form_submission');
         }}
       />
     );
   }
 
-  return (
-    <Dashboard
-      onBackToLaunch={() => {
-        sessionStorage.removeItem('gs_has_launched_tool_v1');
-        setHasLaunchedTool(false);
-      }}
-    />
-  );
+  const backToLaunch = () => {
+    sessionStorage.removeItem('gs_selected_tool_v1');
+    setSelectedTool(null);
+  };
+
+  if (selectedTool === 'form_submission') {
+    return <FormSubmission onBackToLaunch={backToLaunch} />;
+  }
+
+  return <Dashboard onBackToLaunch={backToLaunch} />;
 }
 
 export default App;

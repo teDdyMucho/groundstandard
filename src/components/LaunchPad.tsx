@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, FileText, Sparkles, UserCircle, X, Eye, LogOut } from 'lucide-react';
+import { ArrowRight, ClipboardList, FileText, Sparkles, UserCircle, X, Eye, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type ToolCard = {
@@ -16,9 +16,10 @@ type ToolCard = {
 type LaunchPadProps = {
   domainLabel: string;
   onLaunchArticleGenerator: () => void;
+  onLaunchFormSubmission: () => void;
 };
 
-export default function LaunchPad({onLaunchArticleGenerator }: LaunchPadProps) {
+export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmission }: LaunchPadProps) {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -95,6 +96,14 @@ export default function LaunchPad({onLaunchArticleGenerator }: LaunchPadProps) {
       icon: <FileText className="w-5 h-5 text-white" />,
       actionLabel: 'Open',
       onAction: onLaunchArticleGenerator,
+    },
+    {
+      title: 'Form submission',
+      description: 'Collect and review submitted forms in one place.',
+      features: ['View submissions', 'Manage records', 'Track updates'],
+      icon: <ClipboardList className="w-5 h-5 text-white" />,
+      actionLabel: 'Open',
+      onAction: onLaunchFormSubmission,
     },
   ];
 
