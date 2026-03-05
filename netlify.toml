@@ -32,6 +32,18 @@
   status = 200
   force = true
 
+[[redirects]]
+  from = "/api/form"
+  to = "https://groundstandard.app.n8n.cloud/webhook/form"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/form-submissions"
+  to = "https://groundstandard.app.n8n.cloud/webhook/form-submissions"
+  status = 200
+  force = true
+
 # Optional: If your app is an SPA, uncomment this to handle client-side routes
 # [[redirects]]
 #   from = "/*"
