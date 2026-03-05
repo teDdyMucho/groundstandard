@@ -1,11 +1,15 @@
 import { useState, useMemo, useEffect, useCallback, useRef, type FormEvent } from 'react';
-import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp, Trash, UserCircle, LogOut } from 'lucide-react';
+import { Search, FileText, Clock, CheckCircle, RefreshCw, AlertCircle, X, Send, Plus, Filter, Eye, Edit3, Loader2, Sparkles, ArrowUp, Trash, UserCircle, LogOut, ArrowLeft } from 'lucide-react';
 import ChatWidget from './ChatWidget';
 import { useResearchData } from '../hooks/useResearchData';
 import type { ResearchArticle } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
 
-export default function Dashboard() {
+type DashboardProps = {
+  onBackToLaunch?: () => void;
+};
+
+export default function Dashboard({ onBackToLaunch }: DashboardProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -1725,6 +1729,16 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex items-center space-x-3">
+              {onBackToLaunch && (
+                <button
+                  type="button"
+                  onClick={onBackToLaunch}
+                  className="inline-flex items-center px-4 py-2.5 text-sm font-medium text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
+                </button>
+              )}
               <button 
                 onClick={refetch}
                 disabled={loading || isBusy}

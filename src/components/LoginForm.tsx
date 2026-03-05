@@ -83,8 +83,8 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
   return (
     <div className="h-screen overflow-hidden flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-blue-50/30 px-4 py-6">
-      <div className="w-full max-w-6xl">
-        <div className="grid grid-cols-1 lg:grid-cols-2 bg-white border border-gray-200/60 rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15)] overflow-hidden h-[calc(100vh-3rem)] max-h-[820px]">
+      <div className="w-full max-w-md">
+        <div className="bg-white border border-gray-200/60 rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15)] overflow-hidden">
           <div className="p-8 lg:p-10 xl:p-12 flex flex-col justify-center">
             <div className="mb-6">
               <h1 className="text-3xl lg:text-4xl font-black text-gray-900 mb-2 tracking-tight">{mode === 'signup' ? 'Create account' : 'Sign in'}</h1>
@@ -228,71 +228,6 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 {mode === 'signin' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
               </button>
             </form>
-          </div>
-
-          <div className="relative overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-red-600">
-            <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.5),transparent_50%)]" />
-            <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.4),transparent_60%)]" />
-            <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-            <div className="absolute bottom-0 left-0 w-96 h-96 bg-red-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2" />
-            
-            <div className="relative h-full min-h-[500px] lg:min-h-full p-12 lg:p-16 xl:p-20 text-white flex flex-col justify-between">
-              <div>
-                <div className="inline-flex items-center gap-4 mb-16">
-                  <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center font-black text-xl shadow-2xl">
-                    GS
-                  </div>
-                  <div>
-                    <div className="text-lg font-black tracking-tight">Ground Standard</div>
-                    <div className="text-sm text-white/90 font-semibold tracking-wide">Research. Generate. Scale.</div>
-                  </div>
-                </div>
-
-                <div className="space-y-8">
-                  <div>
-                    <div className="text-5xl lg:text-6xl font-black tracking-tight leading-tight mb-6">
-                      {mode === 'signup' ? 'Create your account' : 'Welcome back'}
-                    </div>
-                    <div className="text-lg text-white/95 max-w-lg leading-relaxed font-medium">
-                      {mode === 'signup'
-                        ? 'Set up your account to start managing your research pipeline and content workflows.'
-                        : 'Continue managing your content research pipeline. Access powerful tools for article discovery, content generation, and workflow automation.'}
-                    </div>
-                  </div>
-
-                  <div className="space-y-4 max-w-lg">
-                    <div className="flex items-start gap-3 text-white/90">
-                      <div className="w-6 h-6 rounded-lg bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-sm">✓</span>
-                      </div>
-                      <div className="text-sm font-medium leading-relaxed">
-                        Automated research article discovery and content extraction
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 text-white/90">
-                      <div className="w-6 h-6 rounded-lg bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-sm">✓</span>
-                      </div>
-                      <div className="text-sm font-medium leading-relaxed">
-                        AI-powered content generation and rewriting capabilities
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3 text-white/90">
-                      <div className="w-6 h-6 rounded-lg bg-white/15 backdrop-blur-sm flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-sm">✓</span>
-                      </div>
-                      <div className="text-sm font-medium leading-relaxed">
-                        Streamlined workflow for content review and publishing
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-sm text-white/75 font-medium">
-                Enterprise-grade security • Encrypted authentication
-              </div>
-            </div>
           </div>
         </div>
       </div>
