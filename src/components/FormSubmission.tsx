@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ClipboardList, Globe, Mail, Phone, RefreshCw, Search, ShieldCheck, ShieldX, FormInput, Link2, Clock, Copy, Download } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Globe, Mail, Phone, RefreshCw, Search, ShieldCheck, ShieldX, FormInput, Link2, Clock, Copy, Download, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type FormSubmissionProps = {
@@ -28,6 +28,9 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
   const [rowsError, setRowsError] = useState<string | null>(null);
   const [rows, setRows] = useState<FormSubmissionRow[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedWebsite, setSelectedWebsite] = useState<string | null>(null);
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<Set<number>>(() => new Set());
+  const [detailsRow, setDetailsRow] = useState<FormSubmissionRow | null>(null);
 
   const formatDateTime = useCallback((value: string | null | undefined) => {
     if (!value) return '—';
@@ -62,10 +65,31 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
     void loadRows();
   }, [loadRows]);
 
+  const getWebsiteLabel = useCallback((row: FormSubmissionRow) => {
+    if (row.source_hostname) return row.source_hostname;
+    if (row.source_url) {
+      try {
+        return new URL(row.source_url).hostname;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, []);
+
+  const visibleRows = useMemo(() => {
+    if (!selectedWebsite) return rows;
+    return rows.filter((r) => (getWebsiteLabel(r) ?? 'Unknown website') === selectedWebsite);
+  }, [getWebsiteLabel, rows, selectedWebsite]);
+
+  useEffect(() => {
+    setSelectedSubmissionIds(new Set());
+  }, [selectedWebsite]);
+
   const normalizedSearch = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
   const filteredRows = useMemo(() => {
-    if (!normalizedSearch) return rows;
-    return rows.filter((r) => {
+    if (!normalizedSearch) return visibleRows;
+    return visibleRows.filter((r) => {
       const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ');
       const haystack = [
         String(r.id),
@@ -84,10 +108,27 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
         .toLowerCase();
       return haystack.includes(normalizedSearch);
     });
-  }, [normalizedSearch, rows]);
+  }, [normalizedSearch, visibleRows]);
 
   const totalCount = rows.length;
   const filteredCount = filteredRows.length;
+
+  const websiteGroups = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of rows) {
+      const key = getWebsiteLabel(r) ?? 'Unknown website';
+      map.set(key, (map.get(key) ?? 0) + 1);
+    }
+
+    const items = Array.from(map.entries()).map(([website, count]) => ({ website, count }));
+    items.sort((a, b) => b.count - a.count || a.website.localeCompare(b.website));
+    return items;
+  }, [getWebsiteLabel, rows]);
+
+  const filteredWebsites = useMemo(() => {
+    if (!normalizedSearch) return websiteGroups;
+    return websiteGroups.filter((g) => g.website.toLowerCase().includes(normalizedSearch));
+  }, [normalizedSearch, websiteGroups]);
 
   const handleCopy = useCallback((value: string | null) => {
     if (!value) return;
@@ -105,7 +146,7 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
     );
   }, []);
 
-  const downloadCsv = useCallback(() => {
+  const downloadCsv = useCallback((exportRows: FormSubmissionRow[], websiteForFilename?: string | null) => {
     const escapeCsv = (value: unknown) => {
       const s = value === null || value === undefined ? '' : String(value);
       if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -143,8 +184,8 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
     ];
 
     const lines = ['sep=,', headers.join(',')];
-    for (const r of filteredRows) {
-      const websiteLabel = r.source_hostname || (r.source_url ? new URL(r.source_url).hostname : null);
+    for (const r of exportRows) {
+      const websiteLabel = getWebsiteLabel(r) ?? 'Unknown website';
       const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ');
       const primarySourceText = getPrimarySourceText(r);
       lines.push(
@@ -178,7 +219,17 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
     const y = now.getFullYear();
     const m = String(now.getMonth() + 1).padStart(2, '0');
     const d = String(now.getDate()).padStart(2, '0');
-    const filename = `form-submissions-${y}-${m}-${d}.csv`;
+    const safeWebsite = websiteForFilename
+      ? websiteForFilename
+          .toLowerCase()
+          .replace(/^https?:\/\//, '')
+          .replace(/[^a-z0-9.-]+/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+      : null;
+    const filename = safeWebsite
+      ? `form-submissions-${safeWebsite}-${y}-${m}-${d}.csv`
+      : `form-submissions-${y}-${m}-${d}.csv`;
 
     const a = document.createElement('a');
     a.href = url;
@@ -187,7 +238,23 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-  }, [filteredRows]);
+  }, [getPrimarySourceText, getWebsiteLabel]);
+
+  const exportableRows = useMemo(() => {
+    if (!selectedWebsite) return filteredRows;
+    if (selectedSubmissionIds.size === 0) return filteredRows;
+    const selected = filteredRows.filter((r) => selectedSubmissionIds.has(r.id));
+    return selected.length > 0 ? selected : filteredRows;
+  }, [filteredRows, selectedSubmissionIds, selectedWebsite]);
+
+  const selectedCountInView = useMemo(() => {
+    if (!selectedWebsite) return 0;
+    let count = 0;
+    for (const r of filteredRows) if (selectedSubmissionIds.has(r.id)) count += 1;
+    return count;
+  }, [filteredRows, selectedSubmissionIds, selectedWebsite]);
+
+  const closeDetails = useCallback(() => setDetailsRow(null), []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/40">
@@ -220,15 +287,6 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
                 <RefreshCw className={`w-4 h-4 mr-2 ${rowsLoading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
-              <button
-                type="button"
-                onClick={downloadCsv}
-                disabled={filteredRows.length === 0}
-                className="inline-flex items-center px-4 py-2.5 text-sm font-semibold text-gray-800 bg-white/90 hover:bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Download CSV
-              </button>
               {onBackToLaunch && (
                 <button
                   type="button"
@@ -249,21 +307,80 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
           <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-600/5 via-transparent to-rose-600/5">
             <div className="flex items-center justify-between gap-4 flex-wrap">
               <div>
-                <div className="text-lg font-extrabold text-gray-900">Responses</div>
-                <div className="text-sm text-gray-600">Showing: {filteredCount} / {totalCount}</div>
-              </div>
-              <div className="w-full sm:w-[520px]">
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                    <Search className="w-5 h-5 text-gray-400" />
+                <div className="flex items-center gap-3 flex-wrap">
+                  {selectedWebsite ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedWebsite(null);
+                        setSearchTerm('');
+                      }}
+                      className="inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-800 bg-white/90 hover:bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
+                    >
+                      <ArrowLeft className="w-4 h-4 mr-2" />
+                      Back
+                    </button>
+                  ) : null}
+                  <div className="text-lg font-extrabold text-gray-900">
+                    {selectedWebsite ? selectedWebsite : 'Websites'}
                   </div>
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search name, email, phone, form name, website, URL, program..."
-                    className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200 shadow-sm"
-                  />
+                </div>
+                <div className="text-sm text-gray-600">
+                  {selectedWebsite ? (
+                    <>Showing: {filteredCount} / {visibleRows.length}</>
+                  ) : (
+                    <>Showing: {filteredWebsites.length} / {websiteGroups.length} (Total submissions: {totalCount})</>
+                  )}
+                </div>
+              </div>
+              <div className="w-full sm:flex-1 sm:min-w-[520px] sm:max-w-[720px]">
+                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                  <div className="relative flex-1 min-w-[260px]">
+                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                      <Search className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder={
+                        selectedWebsite
+                          ? 'Search name, email, phone, form name, URL, program...'
+                          : 'Search website...'
+                      }
+                      className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200 shadow-sm"
+                    />
+                  </div>
+
+                  {selectedWebsite ? (
+                    <div className="flex items-center gap-2">
+                      <label className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl border border-gray-200 bg-white text-xs font-extrabold text-gray-800 shadow-sm">
+                        <input
+                          type="checkbox"
+                          checked={filteredRows.length > 0 && selectedCountInView === filteredRows.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedSubmissionIds(new Set(filteredRows.map((r) => r.id)));
+                            } else {
+                              setSelectedSubmissionIds(new Set());
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        Select All
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => downloadCsv(exportableRows, selectedWebsite)}
+                        disabled={exportableRows.length === 0}
+                        className="inline-flex items-center px-4 py-3 text-sm font-semibold text-gray-800 bg-white/90 hover:bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50"
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        {selectedSubmissionIds.size > 0 ? `Download Selected (${exportableRows.length})` : 'Download CSV'}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -278,7 +395,43 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
           )}
 
           <div className="p-6">
-            {filteredRows.length === 0 ? (
+            {!selectedWebsite ? (
+              filteredWebsites.length === 0 ? (
+                <div className="bg-white/80 backdrop-blur-sm border border-gray-200/60 rounded-3xl shadow-sm p-6 text-sm text-gray-600">
+                  No websites found.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredWebsites.map((g) => (
+                    <button
+                      key={g.website}
+                      type="button"
+                      onClick={() => {
+                        setSelectedWebsite(g.website);
+                        setSearchTerm('');
+                      }}
+                      className="w-full text-left rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur-sm shadow-sm hover:shadow-md transition-all duration-200 px-5 py-4"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 text-sm font-extrabold text-gray-900">
+                            <Globe className="w-4 h-4 text-gray-400" />
+                            <span className="truncate">{g.website}</span>
+                          </div>
+                          <div className="mt-1 text-xs text-gray-600">{g.count} submissions</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs font-extrabold text-gray-700 rounded-2xl border border-gray-200 bg-white px-3 py-1.5">
+                            {g.count}
+                          </div>
+                          <ChevronRight className="w-5 h-5 text-gray-400" />
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            ) : filteredRows.length === 0 ? (
               <div className="bg-white/80 backdrop-blur-sm border border-gray-200/60 rounded-3xl shadow-sm p-6 text-sm text-gray-600">
                 No records found.
               </div>
@@ -286,22 +439,45 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
               <div className="space-y-6">
                 {filteredRows.map((r) => {
                   const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed contact';
-                  const websiteLabel = r.source_hostname || (r.source_url ? new URL(r.source_url).hostname : null);
+                  const websiteLabel = getWebsiteLabel(r) ?? 'Unknown website';
                   const consentOk = r.consent === true;
                   const consent2Ok = r.consent2 === true;
                   const primarySourceText = getPrimarySourceText(r);
+                  const isSelected = selectedSubmissionIds.has(r.id);
 
                   return (
                     <div
                       key={r.id}
-                      className="rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur-sm shadow-sm hover:shadow-lg transition-all duration-200 overflow-hidden"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setDetailsRow(r)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') setDetailsRow(r);
+                      }}
+                      className="rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur-sm shadow-sm hover:shadow-lg transition-all duration-200 overflow-hidden cursor-pointer"
                     >
                       <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
                         <div className="flex items-start justify-between gap-4">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 text-sm font-extrabold text-gray-900">
+                              <label className="inline-flex items-center" aria-label="Select submission">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    setSelectedSubmissionIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (e.target.checked) next.add(r.id);
+                                      else next.delete(r.id);
+                                      return next;
+                                    });
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-4 w-4 rounded border-gray-300"
+                                />
+                              </label>
                               <Globe className="w-4 h-4 text-gray-400" />
-                              <span className="truncate">{websiteLabel ?? '—'}</span>
+                              <span className="truncate">{websiteLabel}</span>
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-sm text-gray-700">
                               <FormInput className="w-4 h-4 text-gray-400" />
@@ -367,7 +543,10 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
                           </div>
                           <button
                             type="button"
-                            onClick={() => handleCopy(primarySourceText)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopy(primarySourceText);
+                            }}
                             disabled={!primarySourceText}
                             className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl border border-gray-200 bg-white text-xs font-extrabold text-gray-800 shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50"
                           >
@@ -384,6 +563,92 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
           </div>
         </div>
       </div>
+
+      {detailsRow && (
+        <div className="fixed inset-0 z-50 flex">
+          <div
+            className="flex-1 bg-slate-900/40 backdrop-blur-sm"
+            onClick={closeDetails}
+            role="button"
+            tabIndex={-1}
+          />
+          <div className="relative w-full max-w-3xl h-full bg-white shadow-[0_20px_50px_rgba(15,23,42,0.25)] border-l border-gray-200 flex flex-col">
+            <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-lg font-extrabold text-gray-900 truncate">Submission Details</div>
+                  <div className="mt-1 text-sm text-gray-600 truncate">
+                    {(getWebsiteLabel(detailsRow) ?? 'Unknown website')}
+                    {detailsRow.form_name ? ` • ${detailsRow.form_name}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeDetails}
+                  className="inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-800 bg-white/90 hover:bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200">
+                  <span className="font-semibold text-gray-700">Form</span>
+                  <span className="text-gray-600">{detailsRow.form_name ?? '—'}</span>
+                </span>
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200">
+                  <span className="font-semibold text-gray-700">Program</span>
+                  <span className="text-gray-600">{detailsRow.program ?? '—'}</span>
+                </span>
+                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-200">
+                  <span className="font-semibold text-gray-700">Submitted</span>
+                  <span className="text-gray-600">{formatDateTime(detailsRow.submitted_at)}</span>
+                </span>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-6 bg-slate-50/60">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {([
+                  { label: 'Submitted At', col: 'submitted_at', value: formatDateTime(detailsRow.submitted_at) },
+                  { label: 'Form Name', col: 'form_name', value: detailsRow.form_name ?? '—' },
+                  { label: 'Program', col: 'program', value: detailsRow.program ?? '—' },
+                  { label: 'First Name', col: 'first_name', value: detailsRow.first_name ?? '—' },
+                  { label: 'Last Name', col: 'last_name', value: detailsRow.last_name ?? '—' },
+                  { label: 'Email', col: 'email', value: detailsRow.email ?? '—' },
+                  { label: 'Phone', col: 'phone', value: detailsRow.phone ?? '—' },
+                  { label: 'Consent', col: 'consent', value: detailsRow.consent === true ? 'Yes' : detailsRow.consent === false ? 'No' : '—' },
+                  { label: 'Consent 2', col: 'consent2', value: detailsRow.consent2 === true ? 'Yes' : detailsRow.consent2 === false ? 'No' : '—' },
+                  { label: 'Source URL', col: 'source_url', value: detailsRow.source_url ?? '—', isLink: true },
+                  { label: 'Source Hostname', col: 'source_hostname', value: detailsRow.source_hostname ?? '—' },
+                  { label: 'Source Pathname', col: 'source_pathname', value: detailsRow.source_pathname ?? '—' },
+                  { label: 'Source Referrer', col: 'source_referrer', value: detailsRow.source_referrer ?? '—', isLink: true },
+                ] satisfies { label: string; col: string; value: string; isLink?: boolean }[]).map((item) => (
+                  <div key={item.col} className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
+                    <div className="text-sm font-black text-gray-900 tracking-tight">{item.label}</div>
+                    <div className="mt-0.5 text-[11px] font-semibold text-gray-500 uppercase tracking-[0.15em]">
+                      <span className="font-mono lowercase">{item.col}</span>
+                    </div>
+                    <div className="mt-2 text-sm text-gray-800 break-words">
+                      {item.isLink && item.value && item.value !== '—' ? (
+                        <a
+                          href={String(item.value)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline break-words"
+                        >
+                          {item.value}
+                        </a>
+                      ) : (
+                        item.value
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
