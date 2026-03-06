@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowRight, ClipboardList, FileText, Sparkles, UserCircle, X, Eye, LogOut } from 'lucide-react';
+import { ArrowRight, ClipboardList, FileText, UserCircle, X, Eye, LogOut } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type ToolCard = {
@@ -8,6 +8,7 @@ type ToolCard = {
   description: string;
   features: string[];
   icon: ReactNode;
+  iconWrapperClass: string;
   actionLabel: string;
   onAction: () => void;
   badge?: string;
@@ -94,6 +95,7 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
       description: 'Create and manage your articles with a clean workflow.',
       features: ['Write articles', 'Rewrite content', 'Manage saved items'],
       icon: <FileText className="w-5 h-5 text-white" />,
+      iconWrapperClass: 'bg-gradient-to-br from-blue-600 to-indigo-600',
       actionLabel: 'Open',
       onAction: onLaunchArticleGenerator,
     },
@@ -102,85 +104,96 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
       description: 'Collect and review submitted forms in one place.',
       features: ['View submissions', 'Manage records', 'Track updates'],
       icon: <ClipboardList className="w-5 h-5 text-white" />,
+      iconWrapperClass: 'bg-gradient-to-br from-emerald-600 to-teal-600',
       actionLabel: 'Open',
       onAction: onLaunchFormSubmission,
     },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 text-gray-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 text-gray-900">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -top-40 -left-40 h-[520px] w-[520px] rounded-full bg-blue-200/30 blur-3xl" />
+        <div className="absolute top-32 -right-56 h-[520px] w-[520px] rounded-full bg-indigo-200/30 blur-3xl" />
+        <div className="absolute -bottom-48 left-1/3 h-[520px] w-[520px] rounded-full bg-rose-200/20 blur-3xl" />
+      </div>
+
       {/* Account Button - Top Right */}
-      <div className="absolute top-6 right-6">
+      <div className="absolute top-6 right-6 z-10">
         <button
           type="button"
           onClick={openAccountModal}
-          className="inline-flex items-center px-4 py-2.5 text-sm font-semibold text-gray-700 bg-white hover:bg-gray-50 border-2 border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-800 bg-white/90 backdrop-blur-sm hover:bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200"
         >
           <UserCircle className="w-4 h-4 mr-2" />
           Account
         </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         {/* Welcome Header */}
-        <div className="text-center mb-10">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg mb-4">
-            <Sparkles className="w-8 h-8 text-white" />
-          </div>
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3">
+        <div className="text-center mb-12">
+          <img 
+            src="/image/icon.png" 
+            alt="Ground Standard" 
+            className="w-16 h-16 mx-auto mb-6 drop-shadow-sm"
+          />
+          <h1 className="text-4xl sm:text-5xl font-black text-gray-900 mb-3 tracking-tight">
             Welcome to Ground Standard
           </h1>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+          <p className="text-base sm:text-lg text-gray-600 max-w-2xl mx-auto">
             Your powerful content management platform. Select a tool below to get started.
           </p>
         </div>
 
         {/* Tools Grid */}
-        <div className="rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-sm shadow-xl overflow-hidden">
-          <div className="p-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-[0_30px_80px_-30px_rgba(15,23,42,0.18)] overflow-hidden">
+          <div className="p-6 sm:p-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               {tools.map((tool) => (
                 <div
                   key={tool.title}
-                  className="rounded-2xl border-2 border-gray-200 bg-white shadow-sm hover:shadow-lg hover:border-blue-300 transition-all duration-200 overflow-hidden"
+                  className="group relative rounded-3xl p-[1px] bg-gradient-to-br from-blue-200/70 via-gray-200/50 to-indigo-200/70"
                 >
-                  <div className="p-6">
-                    <div className="flex items-start justify-between gap-3">
+                  <div className="rounded-3xl bg-white shadow-sm group-hover:shadow-lg transition-all duration-300 overflow-hidden">
+                    <div className="p-6">
                       <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-md">
+                        <div className={`w-12 h-12 rounded-2xl ${tool.iconWrapperClass} flex items-center justify-center shadow-md flex-shrink-0`}>
                           {tool.icon}
                         </div>
-                        <div>
-                          <div className="text-base font-extrabold text-gray-900">{tool.title}</div>
-                          <div className="text-sm text-gray-600 mt-1">{tool.description}</div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="text-lg font-extrabold text-gray-900 tracking-tight leading-none">{tool.title}</div>
+                            {tool.badge && (
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-full bg-gray-100 border border-gray-200 text-gray-700">
+                                {tool.badge}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-600 mt-2 leading-relaxed">{tool.description}</div>
                         </div>
                       </div>
-                      {tool.badge && (
-                        <div className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded-full bg-gray-100 border border-gray-200 text-gray-700">
-                          {tool.badge}
-                        </div>
-                      )}
-                    </div>
 
-                    <div className="mt-5 space-y-2.5">
-                      {tool.features.map((f) => (
-                        <div key={f} className="text-sm text-gray-700 flex items-center gap-2.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                          <span>{f}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                      <div className="mt-5 space-y-2">
+                        {tool.features.map((f) => (
+                          <div key={f} className="text-sm text-gray-700 flex items-center gap-2.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-600/70" />
+                            <span>{f}</span>
+                          </div>
+                        ))}
+                      </div>
 
-                  <div className="px-6 pb-6">
-                    <button
-                      type="button"
-                      onClick={tool.onAction}
-                      className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold rounded-xl text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 shadow-md hover:shadow-lg transition-all duration-200"
-                    >
-                      {tool.actionLabel}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                      <div className="mt-6">
+                        <button
+                          type="button"
+                          onClick={tool.onAction}
+                          className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold rounded-2xl text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-600/25 transition-all duration-200"
+                        >
+                          {tool.actionLabel}
+                          <ArrowRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))}

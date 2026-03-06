@@ -82,19 +82,31 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
   };
 
   return (
-    <div className="h-screen overflow-hidden flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-blue-50/30 px-4 py-6">
-      <div className="w-full max-w-md">
-        <div className="bg-white border border-gray-200/60 rounded-[2rem] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.15)] overflow-hidden">
-          <div className="p-8 lg:p-10 xl:p-12 flex flex-col justify-center">
-            <div className="mb-6">
-              <h1 className="text-3xl lg:text-4xl font-black text-gray-900 mb-2 tracking-tight">{mode === 'signup' ? 'Create account' : 'Sign in'}</h1>
-              <p className="text-sm text-gray-600 leading-relaxed">Access your workspace to manage articles, statuses, and content workflows.</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 via-blue-50/20 to-indigo-50/30 px-4 py-12">
+      <div className="w-full max-w-[480px]">
+        <div className="bg-white rounded-3xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.12)] overflow-hidden">
+          <div className="px-8 pt-10 pb-8">
+            <div className="flex items-center gap-3 mb-8">
+              <img 
+                src="/image/icon.png" 
+                alt="Ground Standard" 
+                className="w-12 h-12 rounded-xl"
+              />
+              <div>
+                <div className="text-base font-black text-gray-900">Ground Standard</div>
+                <div className="text-xs text-gray-600">Secure access to your workspace</div>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="mb-8">
+              <h1 className="text-3xl font-black text-gray-900 mb-2">{mode === 'signup' ? 'Create account' : 'Sign in'}</h1>
+              <p className="text-sm text-gray-600">Access your workspace to manage articles, statuses, and content workflows.</p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
               {mode === 'signup' && (
                 <div>
-                  <label className="block text-sm font-bold text-gray-800 mb-2.5 tracking-wide">Full name</label>
+                  <label className="block text-xs font-bold text-gray-700 mb-2.5 uppercase tracking-wide">Full name</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                       <User className="w-5 h-5 text-gray-400" />
@@ -103,7 +115,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
-                      className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
+                      className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
                       placeholder="Juan Dela Cruz"
                       autoComplete="name"
                     />
@@ -112,7 +124,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               )}
 
               <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2.5 tracking-wide">Email</label>
+                <label className="block text-xs font-bold text-gray-700 mb-2.5 uppercase tracking-wide">Email</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                     <Mail className="w-5 h-5 text-gray-400" />
@@ -121,7 +133,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
+                    className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
                     placeholder="you@company.com"
                     autoComplete="email"
                   />
@@ -130,9 +142,9 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
               <div>
                 <div className="flex items-center justify-between mb-2.5">
-                  <label className="block text-sm font-bold text-gray-800 tracking-wide">Password</label>
+                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">Password</label>
                   {mode === 'signin' && (
-                    <button type="button" className="text-xs text-blue-600 hover:text-blue-700 hover:underline font-semibold transition-colors">
+                    <button type="button" className="text-xs text-blue-600 hover:text-blue-700 font-semibold transition-colors">
                       Forgot password?
                     </button>
                   )}
@@ -145,7 +157,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full pl-12 pr-12 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
+                    className="w-full pl-12 pr-12 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
                     placeholder="Enter your password"
                     autoComplete="current-password"
                   />
@@ -163,7 +175,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               {mode === 'signup' && (
                 <div>
                   <div className="flex items-center justify-between mb-2.5">
-                    <label className="block text-sm font-bold text-gray-800 tracking-wide">Confirm password</label>
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">Confirm password</label>
                   </div>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -173,7 +185,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                       type={showConfirmPassword ? 'text' : 'password'}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full pl-12 pr-12 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
+                      className="w-full pl-12 pr-12 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200"
                       placeholder="Confirm your password"
                       autoComplete="new-password"
                     />
@@ -190,14 +202,13 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               )}
 
               {error && (
-                <div className="rounded-xl border-2 border-red-200 bg-red-50 px-5 py-4 text-sm font-semibold text-red-800 flex items-start gap-2">
-                  <span className="text-red-600 mt-0.5">⚠</span>
-                  <span>{error}</span>
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+                  {error}
                 </div>
               )}
 
               {info && (
-                <div className="rounded-xl border-2 border-blue-200 bg-blue-50 px-5 py-4 text-sm font-semibold text-blue-900">
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
                   {info}
                 </div>
               )}
@@ -205,7 +216,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               <button
                 type="submit"
                 disabled={loading || !email.trim() || !password}
-                className="w-full inline-flex items-center justify-center px-6 py-3 rounded-xl text-sm font-extrabold text-white bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full inline-flex items-center justify-center px-6 py-3 rounded-xl text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 mt-2"
               >
                 {loading ? (
                   <>
@@ -223,11 +234,15 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
               <button
                 type="button"
                 onClick={() => setMode(m => (m === 'signin' ? 'signup' : 'signin'))}
-                className="w-full mt-3 px-6 py-3 rounded-xl text-sm font-bold bg-white border-2 border-gray-200 text-gray-800 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200"
+                className="w-full px-6 py-3 rounded-xl text-sm font-bold bg-white border-2 border-gray-900 text-gray-900 hover:bg-gray-50 transition-all duration-200"
               >
                 {mode === 'signin' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
               </button>
             </form>
+
+            <div className="mt-8 text-center text-xs text-gray-500">
+              By continuing, you agree to use this system responsibly.
+            </div>
           </div>
         </div>
       </div>

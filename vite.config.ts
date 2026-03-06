@@ -36,18 +36,6 @@ export default defineConfig({
         secure: true,
         rewrite: (path) => path.replace(/^\/api\/chat-bot/, '/webhook/chat-bot'),
       },
-      '/api/form': {
-        target: 'https://groundstandard.app.n8n.cloud',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/form/, '/webhook/form'),
-      },
-      '/api/form-submissions': {
-        target: 'https://groundstandard.app.n8n.cloud',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/form-submissions/, '/webhook/form-submissions'),
-      },
     },
   },
   optimizeDeps: {
