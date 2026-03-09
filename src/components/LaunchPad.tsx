@@ -89,6 +89,10 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
     await supabase.auth.signOut();
   }, []);
 
+  const openJomasterTest = useCallback(() => {
+    window.open('https://jomaster-test.netlify.app', '_blank', 'noopener,noreferrer');
+  }, []);
+
   const tools: ToolCard[] = [
     {
       title: 'Article Generator',
@@ -107,6 +111,16 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
       iconWrapperClass: 'bg-gradient-to-br from-emerald-600 to-teal-600',
       actionLabel: 'Open',
       onAction: onLaunchFormSubmission,
+    },
+    {
+      title: 'Jomaster Test',
+      description: 'Preview the latest external tool experience hosted on Netlify.',
+      features: ['Live preview', 'QA checks', 'Landing page review'],
+      icon: <Eye className="w-5 h-5 text-white" />,
+      iconWrapperClass: 'bg-gradient-to-br from-purple-600 to-pink-600',
+      actionLabel: 'Open Site',
+      onAction: openJomasterTest,
+      badge: 'External',
     },
   ];
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ClipboardList, Globe, Mail, Phone, RefreshCw, Search, ShieldCheck, ShieldX, FormInput, Link2, Clock, Copy, Download, ChevronRight } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Globe, RefreshCw, Search, Copy, Download, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type FormSubmissionProps = {
@@ -40,6 +40,27 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
       year: 'numeric',
       month: 'short',
       day: '2-digit',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d);
+  }, []);
+
+  const formatDateOnly = useCallback((value: string | null | undefined) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    }).format(d);
+  }, []);
+
+  const formatTimeOnly = useCallback((value: string | null | undefined) => {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return new Intl.DateTimeFormat(undefined, {
       hour: 'numeric',
       minute: '2-digit',
     }).format(d);
@@ -265,7 +286,7 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
       </div>
 
       <div className="sticky top-0 z-40 border-b border-gray-200/60 bg-white/70 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full px-4 sm:px-6 lg:px-10">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-md">
@@ -302,7 +323,7 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
         </div>
       </div>
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <div className="relative w-full px-4 sm:px-6 lg:px-10 py-10">
         <div className="bg-white/80 backdrop-blur-sm border border-gray-200/60 rounded-3xl shadow-[0_30px_80px_-30px_rgba(15,23,42,0.18)] overflow-hidden">
           <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-blue-600/5 via-transparent to-rose-600/5">
             <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -436,128 +457,147 @@ export default function FormSubmission({ onBackToLaunch }: FormSubmissionProps) 
                 No records found.
               </div>
             ) : (
-              <div className="space-y-6">
-                {filteredRows.map((r) => {
-                  const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed contact';
-                  const websiteLabel = getWebsiteLabel(r) ?? 'Unknown website';
-                  const consentOk = r.consent === true;
-                  const consent2Ok = r.consent2 === true;
-                  const primarySourceText = getPrimarySourceText(r);
-                  const isSelected = selectedSubmissionIds.has(r.id);
+              <div className="rounded-3xl border border-gray-200/70 bg-white/95 shadow-sm overflow-hidden">
+                <table className="w-full text-sm table-fixed">
+                  <thead className="bg-slate-50 text-left text-xs font-bold uppercase tracking-wider text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 w-10">
+                        <span className="sr-only">Select</span>
+                      </th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Phone</th>
+                      <th className="px-4 py-3 w-28">Program</th>
+                      <th className="px-4 py-3 w-20 text-center">Consent</th>
+                      <th className="px-4 py-3 w-24 text-center">Consent 2</th>
+                      <th className="px-4 py-3">Source URL</th>
+                      <th className="px-4 py-3">Source Path</th>
+                      <th className="px-4 py-3">Referrer</th>
+                      <th className="px-4 py-3">Form Name</th>
+                      <th className="px-4 py-3">Submitted</th>
+                      <th className="px-4 py-3 w-32 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 text-gray-800">
+                    {filteredRows.map((r) => {
+                      const fullName = [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unnamed contact';
+                      const consentOk = r.consent === true;
+                      const consent2Ok = r.consent2 === true;
+                      const primarySourceText = getPrimarySourceText(r);
+                      const isSelected = selectedSubmissionIds.has(r.id);
 
-                  return (
-                    <div
-                      key={r.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setDetailsRow(r)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') setDetailsRow(r);
-                      }}
-                      className="rounded-3xl border border-gray-200/70 bg-white/90 backdrop-blur-sm shadow-sm hover:shadow-lg transition-all duration-200 overflow-hidden cursor-pointer"
-                    >
-                      <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 via-white to-indigo-50/30">
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-sm font-extrabold text-gray-900">
-                              <label className="inline-flex items-center" aria-label="Select submission">
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={(e) => {
-                                    setSelectedSubmissionIds((prev) => {
-                                      const next = new Set(prev);
-                                      if (e.target.checked) next.add(r.id);
-                                      else next.delete(r.id);
-                                      return next;
-                                    });
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="h-4 w-4 rounded border-gray-300"
-                                />
-                              </label>
-                              <Globe className="w-4 h-4 text-gray-400" />
-                              <span className="truncate">{websiteLabel}</span>
-                            </div>
-                            <div className="mt-1 flex items-center gap-2 text-sm text-gray-700">
-                              <FormInput className="w-4 h-4 text-gray-400" />
-                              <span className="truncate">{r.form_name ?? '—'}</span>
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 text-xs text-gray-600 flex items-center gap-2">
-                            <Clock className="w-4 h-4 text-gray-400" />
-                            <span className="whitespace-nowrap">{formatDateTime(r.submitted_at)}</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="p-6 pt-4">
-                        <div className="flex items-start justify-between gap-3 flex-wrap">
-                          <div className="min-w-0">
-                            <div className="text-base font-extrabold text-gray-900 truncate">{fullName}</div>
-                            <div className="mt-2 flex items-center gap-4 flex-wrap">
-                              <div className="text-sm text-gray-700 flex items-center gap-2">
-                                <Mail className="w-4 h-4 text-gray-400" />
-                                <span className="truncate max-w-[280px]">{r.email ?? '—'}</span>
-                              </div>
-                              <div className="text-sm text-gray-700 flex items-center gap-2">
-                                <Phone className="w-4 h-4 text-gray-400" />
-                                <span className="truncate max-w-[220px]">{r.phone ?? '—'}</span>
-                              </div>
-                              <div className="text-sm text-gray-700 flex items-center gap-2">
-                                <ClipboardList className="w-4 h-4 text-gray-400" />
-                                <span className="truncate max-w-[220px]">{r.program ?? '—'}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <div
-                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-extrabold ${
-                                consentOk
-                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                                  : 'bg-rose-50 border-rose-200 text-rose-700'
+                      return (
+                        <tr
+                          key={r.id}
+                          className="hover:bg-indigo-50/30 cursor-pointer"
+                          onClick={() => setDetailsRow(r)}
+                        >
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                setSelectedSubmissionIds((prev) => {
+                                  const next = new Set(prev);
+                                  if (e.target.checked) next.add(r.id);
+                                  else next.delete(r.id);
+                                  return next;
+                                });
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-semibold text-gray-900">{fullName}</div>
+                          </td>
+                          <td className="px-4 py-3 text-blue-700 break-words">
+                            {r.email ? (
+                              <a href={`mailto:${r.email}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                                {r.email}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 break-words">{r.phone ?? '—'}</td>
+                          <td className="px-4 py-3 break-words w-28">{r.program ?? '—'}</td>
+                          <td className="px-4 py-3 text-center w-20">
+                            <span
+                              className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${
+                                consentOk ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                               }`}
                             >
-                              {consentOk ? <ShieldCheck className="w-4 h-4" /> : <ShieldX className="w-4 h-4" />}
-                              Consent
-                            </div>
-                            <div
-                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-extrabold ${
-                                consent2Ok
-                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                                  : 'bg-rose-50 border-rose-200 text-rose-700'
+                              {consentOk ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center w-24">
+                            <span
+                              className={`inline-flex items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${
+                                consent2Ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
                               }`}
                             >
-                              {consent2Ok ? <ShieldCheck className="w-4 h-4" /> : <ShieldX className="w-4 h-4" />}
-                              Consent 2
+                              {consent2Ok ? 'Yes' : 'No'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-blue-700 break-words">
+                            {r.source_url ? (
+                              <a
+                                href={r.source_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {r.source_url}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 break-words">{r.source_pathname ?? '—'}</td>
+                          <td className="px-4 py-3 text-blue-700 break-words">
+                            {r.source_referrer ? (
+                              <a
+                                href={r.source_referrer}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="hover:underline"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {r.source_referrer}
+                              </a>
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                          <td className="px-4 py-3 break-words">{r.form_name ?? '—'}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                              {formatDateOnly(r.submitted_at)}
                             </div>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-between gap-3 flex-wrap">
-                          <div className="text-xs text-gray-600 flex items-center gap-2 min-w-0">
-                            <Link2 className="w-4 h-4 text-gray-400" />
-                            <span className="truncate">{primarySourceText ?? '—'}</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleCopy(primarySourceText);
-                            }}
-                            disabled={!primarySourceText}
-                            className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl border border-gray-200 bg-white text-xs font-extrabold text-gray-800 shadow-sm hover:shadow-md transition-all duration-200 disabled:opacity-50"
-                          >
-                            Copy Source
-                            <Copy className="w-4 h-4 text-gray-400" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                            <div className="text-sm font-bold text-gray-900">
+                              {formatTimeOnly(r.submitted_at)}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCopy(primarySourceText);
+                              }}
+                              disabled={!primarySourceText}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                              Copy Source
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
