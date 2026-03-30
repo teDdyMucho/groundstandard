@@ -329,7 +329,7 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
 
       {/* Header */}
       <div className="sticky top-0 z-40 border-b border-gray-200/60 bg-white/70 backdrop-blur-sm">
-        <div className="w-full px-4 sm:px-6 lg:px-10">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-br from-cyan-600 to-blue-600 rounded-2xl flex items-center justify-center shadow-md">
@@ -359,7 +359,7 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
       </div>
 
       {/* Content */}
-      <div className="relative w-full px-4 sm:px-6 lg:px-10 py-10">
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-10">
         <div className="bg-white/80 backdrop-blur-sm border border-gray-200/60 rounded-3xl shadow-[0_30px_80px_-30px_rgba(15,23,42,0.18)] overflow-hidden">
           {/* Toolbar */}
           <div className="px-6 py-5 border-b border-gray-100 bg-gradient-to-r from-cyan-600/5 via-transparent to-blue-600/5">
@@ -449,7 +449,12 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
                               )}
                             </div>
                           </div>
-                          <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-cyan-600 transition-colors flex-shrink-0" />
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="text-xs font-extrabold text-gray-700 rounded-xl border border-gray-200 bg-white px-3 py-1.5">
+                              {g.forms.reduce((sum, f) => sum + f.submissionCount, 0)} {g.forms.reduce((sum, f) => sum + f.submissionCount, 0) === 1 ? 'entry' : 'entries'}
+                            </div>
+                            <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-cyan-600 transition-colors" />
+                          </div>
                         </div>
                       </button>
                     );
