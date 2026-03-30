@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowUp, RefreshCw, Search, Globe, Clock, ExternalLink, ChevronRight, Send, ArrowRight, Users, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowUp, RefreshCw, Search, Globe, Clock, ExternalLink, ChevronRight, Send, Zap, Copy, Check, FileText, Pencil, Save, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 type UpdateFormSubmissionProps = {
@@ -12,9 +12,11 @@ type FormRow = {
   source_url: string | null;
   submitted_at: string | null;
   urls: string | null;
+  form_name: string | null;
   first_name: string | null;
   last_name: string | null;
   email: string | null;
+  phone: string | null;
   program: string | null;
 };
 
@@ -22,16 +24,6 @@ type ParsedUrl = {
   url: string;
   purpose: string;
   trigger: string;
-};
-
-type SubmissionEntry = {
-  id: number;
-  website: string;
-  urls: ParsedUrl[];
-  submittedAt: string;
-  contactName: string;
-  email: string | null;
-  program: string | null;
 };
 
 // Convert raw trigger names to friendly labels
@@ -46,24 +38,14 @@ const friendlyTrigger = (raw: string): string => {
     'on_redirect': 'Redirect after submission',
   };
   if (map[raw]) return map[raw];
-  // Auto-format unknown triggers: on_form_submit → On form submit
-  return raw
-    .replace(/_/g, ' ')
-    .replace(/^on /i, 'When ')
-    .replace(/^/, (s) => s.charAt(0).toUpperCase() + s.slice(1));
+  return raw.replace(/_/g, ' ').replace(/^on /i, 'When ').replace(/^./, s => s.toUpperCase());
 };
 
-// Convert raw purpose text to cleaner display
 const friendlyPurpose = (raw: string): string => {
   if (!raw) return 'Integration webhook';
-  // Clean up common patterns
-  return raw
-    .replace(/—/g, '–')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return raw.replace(/—/g, '–').replace(/\s+/g, ' ').trim();
 };
 
-// Get a short label for the purpose (for tags/badges)
 const purposeLabel = (raw: string): string => {
   const lower = raw.toLowerCase();
   if (lower.includes('highlevel') || lower.includes('crm')) return 'CRM Sync';
@@ -72,13 +54,10 @@ const purposeLabel = (raw: string): string => {
   if (lower.includes('redirect')) return 'Redirect';
   if (lower.includes('webhook')) return 'Webhook';
   if (lower.includes('notification') || lower.includes('notify')) return 'Notification';
-  if (lower.includes('email')) return 'Email';
-  if (lower.includes('sms') || lower.includes('text')) return 'SMS';
   if (raw.length > 25) return raw.slice(0, 22) + '...';
   return raw;
 };
 
-// Color scheme per purpose type
 const purposeColor = (raw: string): { bg: string; text: string; border: string } => {
   const lower = raw.toLowerCase();
   if (lower.includes('highlevel') || lower.includes('crm')) return { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200' };
@@ -88,6 +67,32 @@ const purposeColor = (raw: string): { bg: string; text: string; border: string }
   return { bg: 'bg-slate-50', text: 'text-slate-600', border: 'border-slate-200' };
 };
 
+type SubmissionEntry = {
+  id: number;
+  contactName: string;
+  email: string | null;
+  phone: string | null;
+  program: string | null;
+  submittedAt: string;
+};
+
+type FormConfig = {
+  formName: string;
+  website: string;
+  destinations: ParsedUrl[];
+  lastUpdated: string;
+  submissionCount: number;
+  sourceRowId: number;
+  entries: SubmissionEntry[];
+};
+
+type WebsiteGroup = {
+  website: string;
+  forms: FormConfig[];
+  totalForms: number;
+  lastUpdated: string;
+};
+
 export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmissionProps) {
   const [rows, setRows] = useState<FormRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -95,6 +100,18 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedWebsite, setSelectedWebsite] = useState<string | null>(null);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+
+  // Editing state
+  const [editingForm, setEditingForm] = useState<string | null>(null); // formName being edited
+  const [editDestinations, setEditDestinations] = useState<ParsedUrl[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  const copyUrl = useCallback((url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
+    setTimeout(() => setCopiedUrl(null), 2000);
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setShowScrollTop(window.scrollY > 300);
@@ -109,7 +126,6 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
     try {
       const { data, error: err } = await supabase.rpc('rpc_form_submissions_list');
       if (err) throw err;
-      // Filter to only rows that have urls data
       const all = Array.isArray(data) ? (data as FormRow[]) : [];
       setRows(all.filter(r => r.urls && r.urls.trim() !== ''));
     } catch (e) {
@@ -123,7 +139,6 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
   useEffect(() => {
     void loadRows();
 
-    // Realtime subscription — new submissions appear instantly
     const channel = supabase
       .channel('form_submissions_realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'form_submissions' }, (payload) => {
@@ -137,11 +152,8 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
         setRows(prev => {
           const exists = prev.some(r => r.id === row.id);
           if (row.urls && row.urls.trim() !== '') {
-            return exists
-              ? prev.map(r => r.id === row.id ? row : r)
-              : [row, ...prev];
+            return exists ? prev.map(r => r.id === row.id ? row : r) : [row, ...prev];
           }
-          // If urls was cleared, remove it
           return exists ? prev.filter(r => r.id !== row.id) : prev;
         });
       })
@@ -164,75 +176,131 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
     return null;
   }, [normalizeHostname]);
 
-  // Parse each row into a submission entry (1 submission = 1 card with multiple URLs)
-  const submissions: SubmissionEntry[] = useMemo(() => {
-    const result: SubmissionEntry[] = [];
+  // Build form configs: group by website + form_name, deduplicate destinations
+  const websiteGroups: WebsiteGroup[] = useMemo(() => {
+    // First, group rows by website + form_name
+    const formMap = new Map<string, { rows: FormRow[]; website: string; formName: string }>();
+
     for (const row of rows) {
       const website = getWebsite(row) ?? 'Unknown';
-      const contactName = [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unknown';
-      if (!row.urls) continue;
-      let parsed: ParsedUrl[] = [];
+      const formName = row.form_name || 'Unnamed form';
+      const key = `${website}::${formName}`;
+      const group = formMap.get(key) ?? { rows: [], website, formName };
+      group.rows.push(row);
+      formMap.set(key, group);
+    }
+
+    // Build form configs with deduplicated destinations
+    const siteMap = new Map<string, FormConfig[]>();
+
+    for (const [, group] of formMap) {
+      // Get the latest row (most recent submitted_at)
+      const sorted = [...group.rows].sort((a, b) => new Date(b.submitted_at ?? 0).getTime() - new Date(a.submitted_at ?? 0).getTime());
+      const latestRow = sorted[0];
+
+      let destinations: ParsedUrl[] = [];
       try {
-        const raw = JSON.parse(row.urls);
-        if (Array.isArray(raw)) parsed = raw;
-      } catch { continue; }
-      if (!parsed.length) continue;
+        const raw = JSON.parse(latestRow.urls ?? '[]');
+        if (Array.isArray(raw)) destinations = raw;
+      } catch { /* skip */ }
+
+      const entries: SubmissionEntry[] = sorted.map(r => ({
+        id: r.id,
+        contactName: [r.first_name, r.last_name].filter(Boolean).join(' ') || 'Unknown',
+        email: r.email,
+        phone: r.phone,
+        program: r.program,
+        submittedAt: r.submitted_at ?? '',
+      }));
+
+      const config: FormConfig = {
+        formName: group.formName,
+        website: group.website,
+        destinations,
+        lastUpdated: latestRow.submitted_at ?? '',
+        submissionCount: group.rows.length,
+        sourceRowId: latestRow.id,
+        entries,
+      };
+
+      const siteConfigs = siteMap.get(group.website) ?? [];
+      siteConfigs.push(config);
+      siteMap.set(group.website, siteConfigs);
+    }
+
+    // Build final website groups
+    const result: WebsiteGroup[] = [];
+    for (const [website, forms] of siteMap) {
+      forms.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
       result.push({
-        id: row.id,
         website,
-        urls: parsed,
-        submittedAt: row.submitted_at ?? '',
-        contactName,
-        email: row.email,
-        program: row.program,
+        forms,
+        totalForms: forms.length,
+        lastUpdated: forms[0]?.lastUpdated ?? '',
       });
     }
+    result.sort((a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
     return result;
   }, [rows, getWebsite]);
 
   const normalizedSearch = useMemo(() => searchTerm.trim().toLowerCase(), [searchTerm]);
 
-  const websiteGroups = useMemo(() => {
-    const map = new Map<string, SubmissionEntry[]>();
-    for (const s of submissions) {
-      const arr = map.get(s.website) ?? [];
-      arr.push(s);
-      map.set(s.website, arr);
-    }
-    const items = Array.from(map.entries()).map(([website, list]) => ({
-      website,
-      submissions: list,
-      count: list.length,
-      latestAt: list[0]?.submittedAt ?? '',
-      uniqueContacts: new Set(list.map(s => s.email).filter(Boolean)).size,
-      uniquePurposes: [...new Set(list.flatMap(s => s.urls.map(u => u.purpose)).filter(Boolean))],
-    }));
-    items.sort((a, b) => new Date(b.latestAt).getTime() - new Date(a.latestAt).getTime());
-    return items;
-  }, [submissions]);
-
   const filteredWebsites = useMemo(() => {
     if (!normalizedSearch) return websiteGroups;
-    return websiteGroups.filter((g) => g.website.toLowerCase().includes(normalizedSearch));
+    return websiteGroups.filter(g => g.website.toLowerCase().includes(normalizedSearch));
   }, [normalizedSearch, websiteGroups]);
 
-  const selectedSubmissions = useMemo(() => {
+  const selectedForms = useMemo(() => {
     if (!selectedWebsite) return [];
-    const group = websiteGroups.find((g) => g.website === selectedWebsite);
+    const group = websiteGroups.find(g => g.website === selectedWebsite);
     if (!group) return [];
-    if (!normalizedSearch) return group.submissions;
-    return group.submissions.filter(
-      (s) => s.contactName.toLowerCase().includes(normalizedSearch) ||
-        (s.email || '').toLowerCase().includes(normalizedSearch) ||
-        s.urls.some(u => u.url.toLowerCase().includes(normalizedSearch) || u.purpose.toLowerCase().includes(normalizedSearch)),
+    if (!normalizedSearch) return group.forms;
+    return group.forms.filter(f =>
+      f.formName.toLowerCase().includes(normalizedSearch) ||
+      f.destinations.some(d => d.purpose.toLowerCase().includes(normalizedSearch) || d.url.toLowerCase().includes(normalizedSearch)),
     );
   }, [selectedWebsite, websiteGroups, normalizedSearch]);
 
-  const formatDateTime = useCallback((value: string | null) => {
-    if (!value) return '—';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return value;
-    return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: 'numeric', minute: '2-digit' }).format(d);
+  const startEdit = useCallback((form: FormConfig) => {
+    setEditingForm(form.formName);
+    setEditDestinations(form.destinations.map(d => ({ ...d })));
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingForm(null);
+    setEditDestinations([]);
+  }, []);
+
+  const saveEdit = useCallback(async (form: FormConfig) => {
+    setSaving(true);
+    try {
+      const updatedUrls = JSON.stringify(editDestinations);
+      const { error: err } = await supabase
+        .from('form_submissions')
+        .update({ urls: updatedUrls })
+        .eq('id', form.sourceRowId);
+      if (err) throw err;
+      // Update local state
+      setRows(prev => prev.map(r => r.id === form.sourceRowId ? { ...r, urls: updatedUrls } : r));
+      setEditingForm(null);
+      setEditDestinations([]);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  }, [editDestinations]);
+
+  const updateDestination = useCallback((idx: number, field: keyof ParsedUrl, value: string) => {
+    setEditDestinations(prev => prev.map((d, i) => i === idx ? { ...d, [field]: value } : d));
+  }, []);
+
+  const addDestination = useCallback(() => {
+    setEditDestinations(prev => [...prev, { url: '', purpose: '', trigger: 'on_form_submit' }]);
+  }, []);
+
+  const removeDestination = useCallback((idx: number) => {
+    setEditDestinations(prev => prev.filter((_, i) => i !== idx));
   }, []);
 
   const timeAgo = useCallback((value: string | null) => {
@@ -247,18 +315,9 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
     if (hrs < 24) return `${hrs}h ago`;
     const days = Math.floor(hrs / 24);
     if (days < 30) return `${days}d ago`;
-    return formatDateTime(value);
-  }, [formatDateTime]);
-
-  // Stats for selected website
-  const selectedStats = useMemo(() => {
-    if (!selectedWebsite) return null;
-    const group = websiteGroups.find(g => g.website === selectedWebsite);
-    if (!group) return null;
-    const contacts = group.uniqueContacts;
-    const totalSubmissions = group.submissions.length;
-    return { contacts, totalSubmissions };
-  }, [selectedWebsite, websiteGroups]);
+    const d2 = new Date(value);
+    return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: '2-digit' }).format(d2);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-cyan-50/40">
@@ -278,7 +337,7 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
               </div>
               <div>
                 <h1 className="text-xl sm:text-2xl font-black tracking-tight text-gray-900">Form Integrations</h1>
-                <p className="text-sm text-gray-600">See where your form submissions are being sent</p>
+                <p className="text-sm text-gray-600">Manage where your forms send data to</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -308,7 +367,7 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
               <div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {selectedWebsite && (
-                    <button type="button" onClick={() => { setSelectedWebsite(null); setSearchTerm(''); }}
+                    <button type="button" onClick={() => { setSelectedWebsite(null); setSearchTerm(''); cancelEdit(); }}
                       className="inline-flex items-center px-3 py-2 text-sm font-semibold text-gray-800 bg-white/90 hover:bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-all duration-200">
                       <ArrowLeft className="w-4 h-4 mr-2" />
                       All Websites
@@ -324,9 +383,9 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
                   </div>
                 </div>
                 <div className="text-sm text-gray-600 mt-0.5">
-                  {selectedWebsite && selectedStats
-                    ? <>{selectedStats.totalSubmissions} submission{selectedStats.totalSubmissions !== 1 ? 's' : ''} &middot; {selectedStats.contacts} contact{selectedStats.contacts !== 1 ? 's' : ''} captured</>
-                    : <>{filteredWebsites.length} website{filteredWebsites.length !== 1 ? 's' : ''} with active integrations</>}
+                  {selectedWebsite
+                    ? <>{selectedForms.length} form{selectedForms.length !== 1 ? 's' : ''} configured</>
+                    : <>{filteredWebsites.length} website{filteredWebsites.length !== 1 ? 's' : ''} with active forms</>}
                 </div>
               </div>
               <div className="relative min-w-[260px]">
@@ -334,7 +393,7 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
                   <Search className="w-4 h-4 text-gray-400" />
                 </div>
                 <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder={selectedWebsite ? 'Search integrations...' : 'Search website...'}
+                  placeholder={selectedWebsite ? 'Search forms...' : 'Search website...'}
                   className="w-full pl-11 pr-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-cyan-500/10 focus:border-cyan-500 bg-white text-gray-900 placeholder:text-gray-400 text-sm transition-all duration-200 shadow-sm" />
               </div>
             </div>
@@ -354,12 +413,13 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
               filteredWebsites.length === 0 ? (
                 <div className="text-center py-16">
                   <Globe className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <div className="text-sm font-semibold text-gray-500">No integrations found yet</div>
-                  <div className="text-xs text-gray-400 mt-1">When visitors submit forms on your websites, their integration data will show up here</div>
+                  <div className="text-sm font-semibold text-gray-500">No forms configured yet</div>
+                  <div className="text-xs text-gray-400 mt-1">Forms will appear here automatically when added to your websites</div>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {filteredWebsites.map((g) => {
+                    const allPurposes = [...new Set(g.forms.flatMap(f => f.destinations.map(d => d.purpose)).filter(Boolean))];
                     return (
                       <button key={g.website} type="button"
                         onClick={() => { setSelectedWebsite(g.website); setSearchTerm(''); }}
@@ -371,22 +431,20 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
                               <span className="text-sm font-extrabold text-gray-900 truncate">{g.website}</span>
                             </div>
                             <div className="mt-1.5 flex items-center gap-3 text-xs text-gray-500">
-                              <span className="flex items-center gap-1"><Send className="w-3 h-3" /> {g.count} submission{g.count !== 1 ? 's' : ''}</span>
-                              <span className="flex items-center gap-1"><Users className="w-3 h-3" /> {g.uniqueContacts} contact{g.uniqueContacts !== 1 ? 's' : ''}</span>
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {timeAgo(g.latestAt)}</span>
+                              <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> {g.totalForms} form{g.totalForms !== 1 ? 's' : ''}</span>
+                              <span className="flex items-center gap-1"><Zap className="w-3 h-3" /> {allPurposes.length} destination{allPurposes.length !== 1 ? 's' : ''}</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {timeAgo(g.lastUpdated)}</span>
                             </div>
                             <div className="mt-2 flex flex-wrap gap-1.5">
-                              {g.uniquePurposes.slice(0, 3).map((p) => {
-                                const color = purposeColor(p);
-                                return (
-                                  <span key={p} className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-md ${color.bg} ${color.text} ${color.border} border`}>
-                                    {purposeLabel(p)}
-                                  </span>
-                                );
-                              })}
-                              {g.uniquePurposes.length > 3 && (
+                              {g.forms.slice(0, 4).map((f) => (
+                                <span key={f.formName} className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-md bg-cyan-50 text-cyan-700 border border-cyan-200">
+                                  <FileText className="w-2.5 h-2.5" />
+                                  {f.formName}
+                                </span>
+                              ))}
+                              {g.forms.length > 4 && (
                                 <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-md bg-gray-50 text-gray-500 border border-gray-200">
-                                  +{g.uniquePurposes.length - 3} more
+                                  +{g.forms.length - 4} more
                                 </span>
                               )}
                             </div>
@@ -399,80 +457,167 @@ export default function UpdateFormSubmission({ onBackToLaunch }: UpdateFormSubmi
                 </div>
               )
             ) : (
-              /* ───── All Submissions for Selected Website ───── */
-              selectedSubmissions.length === 0 ? (
+              /* ───── Forms for Selected Website ───── */
+              selectedForms.length === 0 ? (
                 <div className="text-center py-16">
-                  <Zap className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                  <div className="text-sm font-semibold text-gray-500">No submissions found</div>
+                  <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <div className="text-sm font-semibold text-gray-500">No forms found</div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  {selectedSubmissions.map((sub) => (
-                    <div key={sub.id} className="rounded-2xl border border-gray-200/70 bg-white/95 shadow-sm overflow-hidden">
-                      {/* Submission header */}
-                      <div className="px-5 pt-4 pb-3 border-b border-gray-100 bg-gradient-to-r from-slate-50/50 via-white to-cyan-50/30">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center flex-shrink-0">
-                              <Users className="w-4 h-4 text-cyan-600" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="text-sm font-extrabold text-gray-900 truncate">{sub.contactName}</div>
-                              <div className="text-[11px] text-gray-500 truncate">
-                                {sub.email || 'No email'}
-                                {sub.program && <span> &middot; {sub.program} program</span>}
+                <div className="space-y-5">
+                  {selectedForms.map((form) => {
+                    const isEditing = editingForm === form.formName;
+                    return (
+                      <div key={form.formName} className="rounded-2xl border border-gray-200/70 bg-white/95 shadow-sm overflow-hidden">
+                        {/* Form header */}
+                        <div className="px-5 pt-4 pb-3 border-b border-gray-100 bg-gradient-to-r from-slate-50/50 via-white to-cyan-50/30">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-9 h-9 rounded-xl bg-cyan-100 flex items-center justify-center flex-shrink-0">
+                                <FileText className="w-4 h-4 text-cyan-600" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-sm font-extrabold text-gray-900 truncate">{form.formName}</div>
+                                <div className="text-[11px] text-gray-500">
+                                  {form.destinations.length} destination{form.destinations.length !== 1 ? 's' : ''} &middot; Last updated {timeAgo(form.lastUpdated)}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className="text-[11px] text-gray-400">{timeAgo(sub.submittedAt)}</div>
-                            <div className="text-[10px] text-gray-300">{formatDateTime(sub.submittedAt)}</div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {isEditing ? (
+                                <>
+                                  <button type="button" onClick={cancelEdit} disabled={saving}
+                                    className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg border border-gray-200 disabled:opacity-50">
+                                    <X className="w-3.5 h-3.5 mr-1" /> Cancel
+                                  </button>
+                                  <button type="button" onClick={() => saveEdit(form)} disabled={saving}
+                                    className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-white bg-cyan-600 hover:bg-cyan-700 rounded-lg shadow-sm disabled:opacity-50">
+                                    <Save className="w-3.5 h-3.5 mr-1" /> {saving ? 'Saving...' : 'Save'}
+                                  </button>
+                                </>
+                              ) : (
+                                <button type="button" onClick={() => startEdit(form)}
+                                  className="inline-flex items-center px-3 py-1.5 text-xs font-semibold text-cyan-700 bg-cyan-50 hover:bg-cyan-100 rounded-lg border border-cyan-200 transition-all">
+                                  <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* URLs sent to */}
-                      <div className="p-5 space-y-3">
-                        <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Sent to {sub.urls.length} destination{sub.urls.length !== 1 ? 's' : ''}</div>
-                        {sub.urls.map((u, i) => {
-                          const color = purposeColor(u.purpose);
-                          return (
-                            <div key={i} className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
-                              <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md ${color.bg} ${color.text} ${color.border} border`}>
-                                  {purposeLabel(u.purpose)}
-                                </span>
-                                <span className="text-[11px] text-gray-400">{friendlyTrigger(u.trigger)}</span>
+                        {/* Destinations */}
+                        <div className="p-5 space-y-3">
+                          {isEditing ? (
+                            /* ── Edit mode ── */
+                            <>
+                              {editDestinations.map((d, i) => (
+                                <div key={i} className="rounded-xl border border-cyan-200 bg-cyan-50/30 p-4 space-y-2.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Destination {i + 1}</span>
+                                    <button type="button" onClick={() => removeDestination(i)}
+                                      className="text-xs text-red-500 hover:text-red-700 font-semibold">Remove</button>
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">URL</label>
+                                    <input type="text" value={d.url} onChange={(e) => updateDestination(i, 'url', e.target.value)}
+                                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 bg-white text-xs font-mono" />
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Purpose</label>
+                                      <input type="text" value={d.purpose} onChange={(e) => updateDestination(i, 'purpose', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 bg-white text-sm" />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Trigger</label>
+                                      <input type="text" value={d.trigger} onChange={(e) => updateDestination(i, 'trigger', e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500/30 focus:border-cyan-500 bg-white text-sm" />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                              <button type="button" onClick={addDestination}
+                                className="w-full py-2.5 text-xs font-semibold text-cyan-700 bg-white border-2 border-dashed border-cyan-300 rounded-xl hover:bg-cyan-50 transition">
+                                + Add Destination
+                              </button>
+                            </>
+                          ) : (
+                            /* ── View mode ── */
+                            form.destinations.map((d, i) => {
+                              const color = purposeColor(d.purpose);
+                              const isWebhook = /hooks|webhook|api|crm|leadconnector|zapier|integromat|make\.com/i.test(d.url);
+                              const isRedirect = !isWebhook && d.url.startsWith('http');
+                              return (
+                                <div key={i} className="rounded-xl border border-gray-100 bg-gray-50/50 p-3">
+                                  <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md ${color.bg} ${color.text} ${color.border} border`}>
+                                      {purposeLabel(d.purpose)}
+                                    </span>
+                                    <span className="text-[11px] text-gray-400">{friendlyTrigger(d.trigger)}</span>
+                                  </div>
+                                  <div className="text-xs text-gray-700 font-semibold mb-2">{friendlyPurpose(d.purpose)}</div>
+                                  <div className={`flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg px-3 py-1.5 ${isRedirect ? 'cursor-pointer hover:border-cyan-300' : ''} transition-colors`}
+                                    onClick={isRedirect ? () => copyUrl(d.url) : undefined}>
+                                    <Send className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                    <code className="text-[11px] text-gray-500 break-all font-mono flex-1 min-w-0">{d.url}</code>
+                                    {isRedirect && (
+                                      <>
+                                        <button type="button" className={`p-1 flex-shrink-0 transition-colors ${copiedUrl === d.url ? 'text-green-500' : 'text-gray-400 hover:text-cyan-600'}`}>
+                                          {copiedUrl === d.url ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                                        </button>
+                                        {!d.url.includes('{{') && (
+                                          <a href={d.url} target="_blank" rel="noopener noreferrer"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="p-1 text-gray-400 hover:text-cyan-600 transition-colors flex-shrink-0">
+                                            <ExternalLink className="w-3 h-3" />
+                                          </a>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+
+                          {/* ── Form Data / Submission History ── */}
+                          {form.entries.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-gray-100">
+                              <div className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+                                Form Data ({form.entries.length} {form.entries.length === 1 ? 'entry' : 'entries'})
                               </div>
-                              <div className="text-xs text-gray-700 font-semibold mb-2">{friendlyPurpose(u.purpose)}</div>
-                              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-1.5">
-                                <code className="text-[11px] text-gray-500 break-all font-mono flex-1 min-w-0">{u.url}</code>
-                                {u.url && u.url.startsWith('http') && !u.url.includes('{{') && (
-                                  <a href={u.url} target="_blank" rel="noopener noreferrer"
-                                    className="p-1 text-gray-400 hover:text-cyan-600 transition-colors flex-shrink-0">
-                                    <ExternalLink className="w-3 h-3" />
-                                  </a>
-                                )}
+                              <div className="space-y-2">
+                                {form.entries.map((entry) => (
+                                  <div key={entry.id} className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-gray-50/80 border border-gray-100">
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                      <div className="w-7 h-7 rounded-full bg-cyan-100 flex items-center justify-center flex-shrink-0">
+                                        <span className="text-[10px] font-bold text-cyan-700">
+                                          {entry.contactName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                        </span>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold text-gray-800 truncate">{entry.contactName}</div>
+                                        <div className="text-[11px] text-gray-500 truncate">
+                                          {[entry.email, entry.phone].filter(Boolean).join(' · ') || 'No contact info'}
+                                          {entry.program && <span className="text-gray-400"> · {entry.program}</span>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 flex-shrink-0 text-right">
+                                      <div>{timeAgo(entry.submittedAt)}</div>
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
-                          );
-                        })}
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )
             )}
-          </div>
-        </div>
-
-        {/* Info card */}
-        <div className="mt-6 rounded-2xl border border-cyan-200/60 bg-cyan-50/50 px-5 py-4">
-          <div className="flex items-start gap-3">
-            <Zap className="w-5 h-5 text-cyan-500 mt-0.5 flex-shrink-0" />
-            <div className="text-sm text-cyan-800">
-              <span className="font-bold">What is this page?</span> Every time someone fills out a form on your website, the submission gets sent to different services — like your CRM, a thank-you page, or other tools. This page shows you exactly where each submission goes, how many times each integration was used, and who submitted most recently.
-            </div>
           </div>
         </div>
       </div>
