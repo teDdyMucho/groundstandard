@@ -50,6 +50,13 @@
   status = 200
   force = true
 
+# Proxy Supabase images through Netlify domain for clean share links
+[[redirects]]
+  from = "/img/*"
+  to = "https://qkwiauivaerrrbemdlyj.supabase.co/storage/v1/object/public/image-content/:splat"
+  status = 200
+  force = true
+
 # Optional: If your app is an SPA, uncomment this to handle client-side routes
 # [[redirects]]
 #   from = "/*"

@@ -620,6 +620,13 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
     setTimeout(() => setCopiedUrl(false), 2000);
   }, []);
 
+  // Convert Supabase URL to shareable Netlify URL (shows groundstandard.netlify.app on social media)
+  const toShareUrl = useCallback((publicUrl: string) => {
+    const match = publicUrl.match(/\/storage\/v1\/object\/public\/image-content\/(.+)$/);
+    if (match) return `https://groundstandard.netlify.app/img/${match[1]}`;
+    return publicUrl;
+  }, []);
+
   // ── Generate progress state ──
   const [generateProgress, setGenerateProgress] = useState<{ total: number; done: number; current: string; failed: number } | null>(null);
 
@@ -1061,14 +1068,14 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                     </span>
                   </div>
 
-                  {/* Public URL */}
+                  {/* Share URL */}
                   <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-3 border border-gray-200">
                     <Link2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <input type="text" readOnly value={selectedImage.public_url} className="flex-1 bg-transparent text-xs text-gray-600 outline-none truncate" />
-                    <button type="button" onClick={() => copyUrl(selectedImage.public_url)} className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Copy URL">
+                    <input type="text" readOnly value={toShareUrl(selectedImage.public_url)} className="flex-1 bg-transparent text-xs text-gray-600 outline-none truncate" />
+                    <button type="button" onClick={() => copyUrl(toShareUrl(selectedImage.public_url))} className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Copy share link">
                       {copiedUrl ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-gray-500" />}
                     </button>
-                    <a href={selectedImage.public_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Open in new tab">
+                    <a href={toShareUrl(selectedImage.public_url)} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Open in new tab">
                       <ExternalLink className="w-3.5 h-3.5 text-gray-500" />
                     </a>
                   </div>
