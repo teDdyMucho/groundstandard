@@ -53,6 +53,13 @@
 # /img/* is handled by Netlify Edge Function (share-image.ts)
 # Serves OG meta tags for social media crawlers, proxies actual image for browsers
 
+# Raw image proxy — serves the actual image file (used by og:image)
+[[redirects]]
+  from = "/raw-img/*"
+  to = "https://qkwiauivaerrrbemdlyj.supabase.co/storage/v1/object/public/image-content/:splat"
+  status = 200
+  force = true
+
 # Optional: If your app is an SPA, uncomment this to handle client-side routes
 # [[redirects]]
 #   from = "/*"
