@@ -1,7 +1,7 @@
 export default async (request: Request) => {
   const url = new URL(request.url);
   const imagePath = url.pathname.replace('/img/', '');
-  const rawImageUrl = `https://groundstandard.netlify.app/raw-img/${imagePath}`;
+  const rawImageUrl = `https://qkwiauivaerrrbemdlyj.supabase.co/storage/v1/object/public/image-content/${imagePath}`;
   const shareUrl = `https://groundstandard.netlify.app/img/${imagePath}`;
 
   // Always serve HTML with OG tags + instant redirect for browsers
