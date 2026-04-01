@@ -4,7 +4,9 @@
       "Bash(npx tsc:*)",
       "Bash(npx vite:*)",
       "Bash(git config:*)",
-      "WebFetch(domain:groundstandard.netlify.app)"
+      "WebFetch(domain:groundstandard.netlify.app)",
+      "Bash(find c:UsersOngoingDesktopgroundstandardgroundstandardpublic -type f \\\\\\(-iname *.png -o -iname *.jpg -o -iname *.jpeg -o -iname *.gif -o -iname *.svg -o -iname *.webp \\\\\\))",
+      "Bash(grep -n \"scheduled_posts\\\\|form_submissions\\\\|brand_profiles\\\\|image_content\\\\|folders\\\\|Research\" /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/components/*.tsx /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/hooks/*.ts)"
     ]
   }
 }
