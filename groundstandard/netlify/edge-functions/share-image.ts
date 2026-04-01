@@ -23,7 +23,7 @@ export default async (request: Request) => {
   <meta name="twitter:title" content="Ground Standard" />
   <meta name="twitter:image" content="${originalImageUrl}" />
   <title>Ground Standard</title>
-  <script>window.location.replace("${originalImageUrl}");</script>
+  <script>window.location.replace("https://groundstandard.netlify.app/raw-img/${imagePath}");</script>
 </head>
 <body>
   <p>Loading image...</p>
