@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { ArrowLeft, ArrowUp, Upload, Trash2, Image as ImageIcon, Copy, Check, ExternalLink, RefreshCw, Loader2, Link2, Calendar, HardDrive, Sparkles, X, Settings2, Save, Eye, Pencil, CheckCircle2, LayoutList, LayoutGrid, ImagePlus, Download, Clock, Folder, FolderPlus, FolderOpen } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Upload, Trash2, Image as ImageIcon, Copy, Check, ExternalLink, RefreshCw, Loader2, Link2, Calendar, HardDrive, Sparkles, X, Settings2, Save, Eye, Pencil, CheckCircle2, LayoutList, LayoutGrid, ImagePlus, Download, Clock, Folder, FolderPlus, FolderOpen, Video } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
@@ -38,7 +38,15 @@ type ImageRecord = {
   brand_profile_name: string | null;
   brand_company_name: string | null;
   folder_id: number | null;
+  content_type: string;
+  audience_type: string | null;
 };
+
+const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi', 'mkv'];
+function isVideoFile(fileName: string): boolean {
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  return VIDEO_EXTENSIONS.includes(ext);
+}
 
 type FolderRecord = {
   id: number;
@@ -82,6 +90,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
   const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ total: number; done: number; current: string } | null>(null);
+  const [uploadByteProgress, setUploadByteProgress] = useState<number | null>(null); // 0-100 for video uploads
   const [loading, setLoading] = useState(true);
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [generatingContent, setGeneratingContent] = useState<string | null>(null);
@@ -90,6 +99,21 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
   const fileInputRef = useRef<HTMLInputElement>(null);
   const batchIdsRef = useRef<number[]>([]);
   const [dashboardView, setDashboardView] = useState<'gallery' | 'review' | 'schedule'>('gallery');
+  const [contentTab, setContentTab] = useState<'images' | 'videos'>('images');
+  // Video caption generator state
+  const [videoCaptionTab, setVideoCaptionTab] = useState<'compose' | 'captionai'>('captionai');
+  const [videoComposeCaption, setVideoComposeCaption] = useState('');
+  const [videoComposeSaved, setVideoComposeSaved] = useState(false);
+  const [videoAudienceType, setVideoAudienceType] = useState<'adults' | 'kids' | null>(null);
+  const [videoTone, setVideoTone] = useState('excited');
+  const [videoCaptionCount, setVideoCaptionCount] = useState(5);
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [videoGenerating, setVideoGenerating] = useState(false);
+  const [videoGeneratedCaptions, setVideoGeneratedCaptions] = useState<string[]>([]);
+  const [videoSelectedCaption, setVideoSelectedCaption] = useState<number | null>(null);
+  const [videoEditCaption, setVideoEditCaption] = useState('');
+  const [videoCaptionSaved, setVideoCaptionSaved] = useState(false);
+  const [showCaptionModal, setShowCaptionModal] = useState(false);
   const [scheduleTimeFrom, setScheduleTimeFrom] = useState<Date | null>(null);
   const [scheduleTimeTo, setScheduleTimeTo] = useState<Date | null>(null);
   const [scheduleFrequency, setScheduleFrequency] = useState<number | null>(null);
@@ -421,7 +445,9 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
 
   // Upload a single file — returns the new record (no state side-effects)
   const uploadFile = useCallback(async (file: File): Promise<ImageRecord | null> => {
-    if (!file.type.startsWith('image/')) return null;
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/') || isVideoFile(file.name);
+    if (!isImage && !isVideo) return null;
     try {
       const ext = file.name.split('.').pop() || 'png';
       const storagePath = `uploads/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
@@ -429,9 +455,10 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
         .from(BUCKET).upload(storagePath, file, { cacheControl: '3600', upsert: false });
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+      const contentType = isVideo ? 'video' : 'image';
       const { data: row, error: insertError } = await supabase
         .from('image_content')
-        .insert({ file_name: file.name, public_url: urlData.publicUrl, storage_path: storagePath, status: 'uploaded' })
+        .insert({ file_name: file.name, public_url: urlData.publicUrl, storage_path: storagePath, status: 'uploaded', content_type: contentType })
         .select().single();
       if (insertError) throw insertError;
       return row;
@@ -441,14 +468,67 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
     }
   }, []);
 
+  // Upload video with real byte-level progress via XHR
+  const uploadVideoWithProgress = useCallback(async (file: File): Promise<ImageRecord | null> => {
+    try {
+      const ext = file.name.split('.').pop() || 'mp4';
+      const storagePath = `uploads/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const session = (await supabase.auth.getSession()).data.session;
+      const token = session?.access_token || supabaseKey;
+
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${supabaseUrl}/storage/v1/object/${BUCKET}/${storagePath}`);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('apikey', supabaseKey);
+        xhr.setRequestHeader('Content-Type', file.type);
+        xhr.setRequestHeader('x-upsert', 'false');
+        xhr.setRequestHeader('cache-control', 'max-age=3600');
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            setUploadByteProgress(Math.min(Math.round((e.loaded / e.total) * 100), 95));
+          }
+        };
+        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed: ${xhr.status}`));
+        xhr.onerror = () => reject(new Error('Upload network error'));
+        xhr.send(file);
+      });
+
+      const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(storagePath);
+      const { data: row, error: insertError } = await supabase
+        .from('image_content')
+        .insert({ file_name: file.name, public_url: urlData.publicUrl, storage_path: storagePath, status: 'uploaded', content_type: 'video' })
+        .select().single();
+      if (insertError) throw insertError;
+      return row;
+    } catch (err) {
+      console.error('Video upload failed:', err);
+      return null;
+    }
+  }, []);
+
   // Single upload — auto-selects the new image
   const handleUpload = useCallback(async (file: File) => {
     setUploading(true);
-    const row = await uploadFile(file);
-    if (row) { setImages(prev => [row, ...prev]); setSelectedImage(row); }
+    setUploadProgress({ total: 1, done: 0, current: file.name });
+    const isVideo = file.type.startsWith('video/') || isVideoFile(file.name);
+    let row: ImageRecord | null;
+    if (isVideo) {
+      setUploadByteProgress(0);
+      row = await uploadVideoWithProgress(file);
+      setUploadByteProgress(100);
+      await new Promise(r => setTimeout(r, 300));
+      setUploadByteProgress(null);
+    } else {
+      row = await uploadFile(file);
+    }
+    if (row) { setImages(prev => [row!, ...prev]); setSelectedImage(row); }
     else alert('Upload failed. Make sure the "image-content" bucket exists and is public.');
-    setUploading(false);
-  }, [uploadFile]);
+    setUploadProgress({ total: 1, done: 1, current: '' });
+    setTimeout(() => { setUploadProgress(null); setUploading(false); }, 2000);
+  }, [uploadFile, uploadVideoWithProgress]);
 
   const processBatchUpload = useCallback(async (files: File[]) => {
     setUploading(true);
@@ -474,11 +554,15 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+    const files = Array.from(e.dataTransfer.files).filter(f =>
+      contentTab === 'videos'
+        ? (f.type.startsWith('video/') || isVideoFile(f.name))
+        : f.type.startsWith('image/')
+    );
     if (!files.length) return;
     if (files.length === 1) { handleUpload(files[0]); return; }
     processBatchUpload(files);
-  }, [handleUpload, processBatchUpload]);
+  }, [handleUpload, processBatchUpload, contentTab]);
 
   const handleDelete = useCallback((img: ImageRecord) => {
     setDeleteConfirmId(img.id);
@@ -762,6 +846,65 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
     // Each chunk = separate n8n execution = fresh timeout
   }, [images, brandProfile, savedProfiles, activeProfileId]);
 
+  // Reset video caption state when selecting a different video
+  useEffect(() => {
+    setVideoComposeCaption(selectedImage?.caption || '');
+    setVideoGeneratedCaptions([]);
+    setVideoSelectedCaption(null);
+    setVideoEditCaption('');
+    setVideoCaptionSaved(false);
+    setVideoPrompt('');
+    setVideoAudienceType(selectedImage?.audience_type as 'adults' | 'kids' | null ?? null);
+  }, [selectedImage?.id]);
+
+  // ── Video caption generation ──
+  const handleVideoGenerate = useCallback(async () => {
+    if (!selectedImage || !videoAudienceType || !videoPrompt.trim() || !activeProfileId) return;
+    setVideoGenerating(true);
+    setVideoGeneratedCaptions([]);
+    try {
+      // Save audience_type to DB
+      await supabase.from('image_content').update({ audience_type: videoAudienceType }).eq('id', selectedImage.id);
+
+      const res = await fetch('/api/video-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          video_id: selectedImage.id,
+          video_url: selectedImage.public_url,
+          file_name: selectedImage.file_name,
+          audience_type: videoAudienceType,
+          tone: videoTone,
+          caption_count: videoCaptionCount,
+          prompt: videoPrompt.trim(),
+          brand_profile: {
+            company_name: brandProfile.company_name,
+            brand_voice: brandProfile.brand_voice,
+            focus_areas: brandProfile.focus_areas,
+            industry: brandProfile.industry,
+            location: brandProfile.location,
+            target_audience: brandProfile.target_audience,
+            additional_instructions: brandProfile.additional_instructions,
+          },
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
+      const data = await res.json();
+      // Expect { captions: ["caption1", "caption2", ...] }
+      const captions = Array.isArray(data.captions) ? data.captions : Array.isArray(data) ? data : [];
+      setVideoGeneratedCaptions(captions);
+      setVideoSelectedCaption(null);
+      setVideoEditCaption('');
+      if (captions.length > 0) setShowCaptionModal(true);
+    } catch (err) {
+      console.error('Video caption generation failed:', err);
+      setVideoGeneratedCaptions([]);
+    } finally {
+      setVideoGenerating(false);
+    }
+  }, [selectedImage, videoAudienceType, videoTone, videoCaptionCount, videoPrompt, activeProfileId, brandProfile]);
+
   const formatDate = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   // Single action matching Bobby's task
@@ -815,7 +958,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
         </div>
       </div>
 
-      <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFileInput} />
+      <input ref={fileInputRef} type="file" accept={contentTab === 'videos' ? 'video/mp4,video/quicktime,video/webm' : 'image/*'} multiple className="hidden" onChange={handleFileInput} />
 
       {/* ── Brand Profile Modal ── */}
       {showBrandProfile && (
@@ -1077,7 +1220,11 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
               </button>
               <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
                 <div className="bg-gray-50 flex items-center justify-center min-h-[400px] p-4">
-                  <img src={selectedImage.public_url} alt={selectedImage.file_name} className="max-w-full max-h-[60vh] object-contain rounded-lg" />
+                  {selectedImage.content_type === 'video' ? (
+                    <video src={selectedImage.public_url} controls className="max-w-full max-h-[60vh] rounded-lg" />
+                  ) : (
+                    <img src={selectedImage.public_url} alt={selectedImage.file_name} className="max-w-full max-h-[60vh] object-contain rounded-lg" />
+                  )}
                 </div>
                 <div className="p-5 border-t border-gray-100">
                   <div className="flex items-center justify-between mb-3">
@@ -1198,7 +1345,132 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                 </div>
               )}
 
-              {!(selectedImage.content || selectedImage.caption) && (
+              {/* Video Caption Generator */}
+              {contentTab === 'videos' && selectedImage.content_type === 'video' && (
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {/* Compose / CaptionAI tabs */}
+                  <div className="flex border-b border-gray-100">
+                    <button type="button" onClick={() => setVideoCaptionTab('compose')}
+                      className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-all ${videoCaptionTab === 'compose' ? 'text-violet-700 border-b-2 border-violet-500 bg-violet-50/50' : 'text-gray-400 hover:text-gray-600'}`}>
+                      Compose
+                    </button>
+                    <button type="button" onClick={() => setVideoCaptionTab('captionai')}
+                      className={`flex-1 px-4 py-3 text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 ${videoCaptionTab === 'captionai' ? 'text-violet-700 border-b-2 border-violet-500 bg-violet-50/50' : 'text-gray-400 hover:text-gray-600'}`}>
+                      <Sparkles className="w-3 h-3" /> CaptionAI
+                    </button>
+                  </div>
+
+                  <div className="p-5">
+                    {videoCaptionTab === 'compose' ? (
+                      /* Compose Tab */
+                      <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Write your caption</label>
+                        <textarea
+                          value={videoComposeCaption}
+                          onChange={e => setVideoComposeCaption(e.target.value)}
+                          placeholder="Write a caption for this video..."
+                          rows={5}
+                          className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 text-sm resize-none"
+                        />
+                        <div className="flex items-center justify-between mt-3">
+                          <span className="text-[11px] text-gray-400">{videoComposeCaption.length} characters</span>
+                          <button type="button"
+                            onClick={async () => {
+                              if (!videoComposeCaption.trim()) return;
+                              await supabase.from('image_content').update({ caption: videoComposeCaption.trim() }).eq('id', selectedImage.id);
+                              const updated = { ...selectedImage, caption: videoComposeCaption.trim() };
+                              setSelectedImage(updated);
+                              setImages(prev => prev.map(i => i.id === selectedImage.id ? updated : i));
+                              setVideoComposeSaved(true);
+                              setTimeout(() => setVideoComposeSaved(false), 2000);
+                            }}
+                            disabled={!videoComposeCaption.trim()}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-violet-600 hover:bg-violet-700 rounded-xl shadow-sm transition disabled:opacity-50">
+                            {videoComposeSaved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+                            {videoComposeSaved ? 'Saved!' : 'Save Caption'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      /* CaptionAI Tab */
+                      <div className="space-y-4">
+                        {/* Audience Type */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Audience *</label>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setVideoAudienceType('adults')}
+                              className={`flex-1 px-4 py-2.5 text-sm font-bold rounded-xl border-2 transition-all ${videoAudienceType === 'adults' ? 'bg-violet-50 border-violet-400 text-violet-700' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                              Adults
+                            </button>
+                            <button type="button" onClick={() => setVideoAudienceType('kids')}
+                              className={`flex-1 px-4 py-2.5 text-sm font-bold rounded-xl border-2 transition-all ${videoAudienceType === 'kids' ? 'bg-violet-50 border-violet-400 text-violet-700' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                              Kids
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Tone */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Tone</label>
+                          <select value={videoTone} onChange={e => setVideoTone(e.target.value)}
+                            className="w-full px-4 py-2.5 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 text-sm font-semibold text-gray-700 bg-white">
+                            <option value="excited">Excited</option>
+                            <option value="professional">Professional</option>
+                            <option value="casual">Casual</option>
+                            <option value="motivational">Motivational</option>
+                            <option value="friendly">Friendly</option>
+                          </select>
+                        </div>
+
+                        {/* Number of Captions */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2"># Captions</label>
+                          <div className="flex gap-1.5">
+                            {[1, 2, 3, 4, 5].map(n => (
+                              <button key={n} type="button" onClick={() => setVideoCaptionCount(n)}
+                                className={`w-10 h-10 rounded-xl text-sm font-bold border-2 transition-all ${videoCaptionCount === n ? 'bg-violet-50 border-violet-400 text-violet-700' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Prompt */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Describe the video *</label>
+                          <textarea
+                            value={videoPrompt}
+                            onChange={e => setVideoPrompt(e.target.value)}
+                            placeholder="e.g. Students at the academy giving testimonials about their experience"
+                            rows={3}
+                            className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 text-sm resize-none"
+                          />
+                        </div>
+
+                        {/* Generate Button */}
+                        <button type="button"
+                          onClick={() => handleVideoGenerate()}
+                          disabled={!videoAudienceType || !videoPrompt.trim() || !activeProfileId || !brandProfile.company_name || videoGenerating}
+                          className="w-full flex items-center justify-center gap-2 px-5 py-3.5 text-sm font-extrabold text-white bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 rounded-2xl shadow-md shadow-violet-600/20 hover:shadow-lg transition-all duration-200 disabled:opacity-50">
+                          {videoGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                          {videoGenerating ? 'Generating...' : 'Generate Captions'}
+                        </button>
+
+                        {(!activeProfileId || !brandProfile.company_name) && (
+                          <p className="text-[11px] text-amber-600 font-semibold">Select a Brand Profile to enable caption generation.</p>
+                        )}
+                        {!videoAudienceType && (
+                          <p className="text-[11px] text-amber-600 font-semibold">Select audience type (Adults or Kids).</p>
+                        )}
+
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Image Generate Content - only for images */}
+              {contentTab === 'images' && !(selectedImage.content || selectedImage.caption) && (
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5">
                   <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider mb-1">Generate Content</h3>
                   <p className="text-xs text-gray-500 mb-5">AI will analyze this image and create a caption with hashtags based on your brand profile</p>
@@ -1254,21 +1526,43 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
         ) : (
           /* ── Gallery / Dashboard View ── */
           <>
+            {/* Content Type Tabs */}
+            <div className="flex items-center gap-2 mb-6">
+              <button
+                type="button"
+                onClick={() => setContentTab('images')}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl border-2 transition-all duration-200 ${contentTab === 'images' ? 'bg-gradient-to-r from-orange-500 to-rose-500 text-white border-transparent shadow-md shadow-orange-500/20' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:text-gray-900'}`}
+              >
+                <ImageIcon className="w-4 h-4" />
+                Images
+              </button>
+              <button
+                type="button"
+                onClick={() => { setContentTab('videos'); setDashboardView('gallery'); }}
+                className={`inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold rounded-xl border-2 transition-all duration-200 ${contentTab === 'videos' ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white border-transparent shadow-md shadow-violet-500/20' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:text-gray-900'}`}
+              >
+                <Video className="w-4 h-4" />
+                Videos
+              </button>
+            </div>
+
             {/* Hero */}
-            <div className="rounded-3xl border border-gray-200/60 bg-gradient-to-r from-orange-50/80 via-white to-rose-50/80 shadow-sm p-8 sm:p-10 mb-8">
+            <div className={`rounded-3xl border border-gray-200/60 shadow-sm p-8 sm:p-10 mb-8 ${contentTab === 'videos' ? 'bg-gradient-to-r from-violet-50/80 via-white to-purple-50/80' : 'bg-gradient-to-r from-orange-50/80 via-white to-rose-50/80'}`}>
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 flex items-center justify-center shadow-lg flex-shrink-0">
-                  <ImageIcon className="w-8 h-8 text-white" />
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg flex-shrink-0 ${contentTab === 'videos' ? 'bg-gradient-to-br from-violet-500 to-purple-600' : 'bg-gradient-to-br from-orange-500 to-rose-500'}`}>
+                  {contentTab === 'videos' ? <Video className="w-8 h-8 text-white" /> : <ImageIcon className="w-8 h-8 text-white" />}
                 </div>
                 <div className="flex-1">
-                  <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mb-1">Image Content Editor</h2>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mb-1">{contentTab === 'videos' ? 'Video Content Editor' : 'Image Content Editor'}</h2>
                   <p className="text-sm text-gray-600 leading-relaxed max-w-2xl">
-                    Upload multiple images, generate AI captions and tags, then review and approve each post before publishing.
+                    {contentTab === 'videos'
+                      ? 'Upload videos, generate AI captions with your brand profile, then review and schedule for posting.'
+                      : 'Upload multiple images, generate AI captions and tags, then review and approve each post before publishing.'}
                   </p>
                 </div>
-                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-2 px-6 py-3 text-sm font-extrabold text-white bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 rounded-2xl shadow-md shadow-orange-500/20 hover:shadow-lg transition-all duration-200 flex-shrink-0 disabled:opacity-50">
-                  {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImagePlus className="w-4 h-4" />}
-                  {uploading ? 'Uploading...' : 'Upload Images'}
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading} className={`inline-flex items-center gap-2 px-6 py-3 text-sm font-extrabold text-white rounded-2xl shadow-md hover:shadow-lg transition-all duration-200 flex-shrink-0 disabled:opacity-50 ${contentTab === 'videos' ? 'bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 shadow-violet-500/20' : 'bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 shadow-orange-500/20'}`}>
+                  {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : contentTab === 'videos' ? <Video className="w-4 h-4" /> : <ImagePlus className="w-4 h-4" />}
+                  {uploading ? 'Uploading...' : contentTab === 'videos' ? 'Upload Videos' : 'Upload Images'}
                 </button>
               </div>
             </div>
@@ -1281,7 +1575,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   onClick={() => setDashboardView('gallery')}
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${dashboardView === 'gallery' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
-                  <ImageIcon className="w-4 h-4" /> Gallery
+                  {contentTab === 'videos' ? <Video className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
+                  {contentTab === 'videos' ? 'Video Gallery' : 'Gallery'}
                 </button>
                 <button
                   type="button"
@@ -1289,8 +1584,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${dashboardView === 'review' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <LayoutList className="w-4 h-4" /> Review Queue
-                  {galleryFolderFilter !== 'unset' && (() => {
-                    const count = images.filter(i => (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter))).length;
+                  {contentTab === 'images' && galleryFolderFilter !== 'unset' && (() => {
+                    const count = images.filter(i => i.content_type !== 'video' && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter))).length;
                     return count > 0 ? (
                       <span className="ml-0.5 px-1.5 py-0.5 text-[9px] font-extrabold bg-orange-500 text-white rounded-full">
                         {count}
@@ -1304,8 +1599,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${dashboardView === 'schedule' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <Calendar className="w-4 h-4" /> Schedule
-                  {galleryFolderFilter !== 'unset' && (() => {
-                    const scheduledInFolder = images.filter(i => scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
+                  {contentTab === 'images' && galleryFolderFilter !== 'unset' && (() => {
+                    const scheduledInFolder = images.filter(i => i.content_type !== 'video' && scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
                     return scheduledInFolder.length > 0 ? (
                       <span className="ml-0.5 px-1.5 py-0.5 text-[9px] font-extrabold bg-green-500 text-white rounded-full">
                         {scheduledInFolder.length}
@@ -1325,17 +1620,23 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   onDragOver={e => e.preventDefault()}
                   onDrop={handleDrop}
                   onClick={() => fileInputRef.current?.click()}
-                  className="cursor-pointer border-2 border-dashed border-gray-300 hover:border-orange-400 rounded-3xl p-10 text-center bg-white/60 hover:bg-orange-50/40 transition-all duration-300 shadow-sm hover:shadow-md flex flex-col items-center justify-center mb-6"
+                  className={`cursor-pointer border-2 border-dashed border-gray-300 rounded-3xl p-10 text-center bg-white/60 transition-all duration-300 shadow-sm hover:shadow-md flex flex-col items-center justify-center mb-6 ${contentTab === 'videos' ? 'hover:border-violet-400 hover:bg-violet-50/40' : 'hover:border-orange-400 hover:bg-orange-50/40'}`}
                 >
-                  <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-orange-500 to-rose-500 flex items-center justify-center shadow-lg">
-                    <Upload className="w-6 h-6 text-white" />
+                  <div className={`w-12 h-12 mx-auto mb-4 rounded-2xl flex items-center justify-center shadow-lg ${contentTab === 'videos' ? 'bg-gradient-to-br from-violet-500 to-purple-600' : 'bg-gradient-to-br from-orange-500 to-rose-500'}`}>
+                    {contentTab === 'videos' ? <Video className="w-6 h-6 text-white" /> : <Upload className="w-6 h-6 text-white" />}
                   </div>
-                  <h3 className="text-base font-extrabold text-gray-900 mb-1">Drop images here</h3>
+                  <h3 className="text-base font-extrabold text-gray-900 mb-1">{contentTab === 'videos' ? 'Drop videos here' : 'Drop images here'}</h3>
                   <p className="text-sm text-gray-500 mb-3">or click to browse — select multiple at once</p>
                   <div className="flex items-center gap-2 flex-wrap justify-center">
-                    {['JPG', 'PNG', 'GIF', 'WEBP', 'SVG'].map(fmt => (
-                      <span key={fmt} className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 rounded-lg border border-gray-200">{fmt}</span>
-                    ))}
+                    {contentTab === 'videos' ? (
+                      ['MP4', 'MOV', 'WEBM'].map(fmt => (
+                        <span key={fmt} className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-violet-50 text-violet-600 rounded-lg border border-violet-200">{fmt}</span>
+                      ))
+                    ) : (
+                      ['JPG', 'PNG', 'GIF', 'WEBP', 'SVG'].map(fmt => (
+                        <span key={fmt} className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider bg-gray-100 text-gray-600 rounded-lg border border-gray-200">{fmt}</span>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -1346,35 +1647,38 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         <FolderOpen className="w-6 h-6 text-white" />
                       </div>
                       <h3 className="text-base font-extrabold text-gray-900">Select a Folder</h3>
-                      <p className="text-sm text-gray-500 mt-1">Choose a folder to view your images</p>
+                      <p className="text-sm text-gray-500 mt-1">Choose a folder to view your {contentTab === 'videos' ? 'videos' : 'images'}</p>
                     </div>
                     <div className="flex flex-wrap justify-center gap-3 max-w-2xl mx-auto">
-                      {folders.map(f => (
-                        <button key={f.id} type="button" onClick={() => setGalleryFolderFilter(f.id)}
-                          className="flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-gray-200 bg-white hover:border-orange-400 hover:bg-orange-50 transition-all shadow-sm hover:shadow-md">
-                          <Folder className="w-7 h-7 text-orange-400" />
-                          <span className="text-sm font-bold text-gray-900 truncate max-w-full">{f.name}</span>
-                          <span className="text-xs text-gray-400">{images.filter(i => i.folder_id === f.id).length} images</span>
-                        </button>
-                      ))}
+                      {folders.map(f => {
+                        const count = images.filter(i => i.folder_id === f.id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')).length;
+                        return (
+                          <button key={f.id} type="button" onClick={() => setGalleryFolderFilter(f.id)}
+                            className={`flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-gray-200 bg-white transition-all shadow-sm hover:shadow-md ${contentTab === 'videos' ? 'hover:border-violet-400 hover:bg-violet-50' : 'hover:border-orange-400 hover:bg-orange-50'}`}>
+                            <Folder className={`w-7 h-7 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
+                            <span className="text-sm font-bold text-gray-900 truncate max-w-full">{f.name}</span>
+                            <span className="text-xs text-gray-400">{count} {contentTab === 'videos' ? 'videos' : 'images'}</span>
+                          </button>
+                        );
+                      })}
                       {/* Unfiled option */}
-                      {images.some(i => !i.folder_id) && (
+                      {images.some(i => !i.folder_id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')) && (
                         <button type="button" onClick={() => setGalleryFolderFilter(null)}
-                          className="flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 hover:border-orange-400 hover:bg-orange-50 transition-all shadow-sm hover:shadow-md">
+                          className={`flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-dashed border-gray-300 bg-gray-50 transition-all shadow-sm hover:shadow-md ${contentTab === 'videos' ? 'hover:border-violet-400 hover:bg-violet-50' : 'hover:border-orange-400 hover:bg-orange-50'}`}>
                           <Folder className="w-7 h-7 text-gray-300" />
                           <span className="text-sm font-bold text-gray-600">Unfiled</span>
-                          <span className="text-xs text-gray-400">{images.filter(i => !i.folder_id).length} images</span>
+                          <span className="text-xs text-gray-400">{images.filter(i => !i.folder_id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')).length} {contentTab === 'videos' ? 'videos' : 'images'}</span>
                         </button>
                       )}
                     </div>
-                    {folders.length === 0 && !images.some(i => !i.folder_id) && (
+                    {folders.length === 0 && !images.some(i => !i.folder_id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')) && (
                       <div className="text-center py-4">
                         <p className="text-sm text-gray-400">No folders yet — use the <span className="font-bold text-gray-600">Folder</span> button to create one.</p>
                       </div>
                     )}
-                    <div className="mt-6 flex items-center gap-2 px-4 py-3 bg-blue-50 rounded-xl border border-blue-100 max-w-2xl mx-auto">
-                      <Upload className="w-4 h-4 text-blue-400 flex-shrink-0" />
-                      <p className="text-xs text-blue-600 font-semibold">You can upload images using the drop zone above — they will appear under Unfiled until you move them to a folder.</p>
+                    <div className={`mt-6 flex items-center gap-2 px-4 py-3 rounded-xl border max-w-2xl mx-auto ${contentTab === 'videos' ? 'bg-violet-50 border-violet-100' : 'bg-blue-50 border-blue-100'}`}>
+                      <Upload className={`w-4 h-4 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-blue-400'}`} />
+                      <p className={`text-xs font-semibold ${contentTab === 'videos' ? 'text-violet-600' : 'text-blue-600'}`}>You can upload {contentTab === 'videos' ? 'videos' : 'images'} using the drop zone above — they will appear under Unfiled until you move them to a folder.</p>
                     </div>
                   </div>
                 ) : loading ? (
@@ -1383,9 +1687,10 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   <div className="text-center py-12"><ImageIcon className="w-10 h-10 text-gray-300 mx-auto mb-3" /><p className="text-sm text-gray-500 font-semibold">No images uploaded yet</p></div>
                 ) : (() => {
                   const folderImages = images.filter(img =>
-                    galleryFolderFilter === 'all' ? true :
+                    (contentTab === 'videos' ? img.content_type === 'video' : img.content_type !== 'video') &&
+                    (galleryFolderFilter === 'all' ? true :
                     galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !img.folder_id :
-                    img.folder_id === galleryFolderFilter
+                    img.folder_id === galleryFolderFilter)
                   );
                   const uploadedImgs = folderImages.filter(i => i.status === 'uploaded');
                   const selectedCount = [...selectedForGenerate].filter(id => folderImages.some(i => i.id === id)).length;
@@ -1396,8 +1701,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         <>
                     <div className="px-6 sm:px-8 pt-6 pb-4 flex items-center justify-between gap-4 flex-wrap">
                       <div>
-                        <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider">Images</h3>
-                        <p className="text-xs text-gray-500 mt-1">{folderImages.length} image{folderImages.length !== 1 ? 's' : ''} in your library</p>
+                        <h3 className="text-sm font-extrabold text-gray-900 uppercase tracking-wider">{contentTab === 'videos' ? 'Videos' : 'Images'}</h3>
+                        <p className="text-xs text-gray-500 mt-1">{folderImages.length} {contentTab === 'videos' ? 'video' : 'image'}{folderImages.length !== 1 ? 's' : ''} in your library</p>
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
                         <select
@@ -1425,8 +1730,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         </div>
                       </div>
                     </div>
-                    {/* Select All / Move / Generate toolbar row */}
-                    <div className="flex items-center gap-2 flex-wrap px-6 pb-3 border-b border-gray-100">
+                    {/* Select All / Move / Generate toolbar row — images only */}
+                    {contentTab === 'images' && <div className="flex items-center gap-2 flex-wrap px-6 pb-3 border-b border-gray-100">
                       <button type="button" onClick={() => {
                         if (selectedCount === folderImages.length) { setSelectedForGenerate(new Set()); }
                         else { setSelectedForGenerate(new Set(folderImages.map(i => i.id))); }
@@ -1469,10 +1774,10 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                           <span className="text-xs text-amber-600 font-semibold">Select a Brand Profile first</span>
                         )
                       )}
-                    </div>
+                    </div>}
                     <div className="p-6 sm:p-8 pt-4">
-                      {/* Helper note — always visible */}
-                      {(galleryFilter === 'all' || galleryFilter === 'uploaded') && images.some(i => i.status === 'uploaded') && (
+                      {/* Helper note — images only */}
+                      {contentTab === 'images' && (galleryFilter === 'all' || galleryFilter === 'uploaded') && images.some(i => i.status === 'uploaded') && (
                         <div className="flex items-center gap-2 mb-4 px-3 py-2 bg-purple-50 rounded-xl border border-purple-100">
                           <Sparkles className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
                           <p className="text-[11px] text-purple-600 font-semibold">Check uploaded images to generate content for selected ones only, then click <span className="font-extrabold">Generate Selected</span>.</p>
@@ -1560,14 +1865,14 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             const isChecked = selectedForGenerate.has(img.id);
                             return (
                               <div key={img.id} className={`group relative rounded-2xl border-2 bg-white overflow-hidden shadow-sm transition-all duration-200 text-left ${isChecked ? 'border-purple-400 shadow-purple-100' : 'border-gray-200 hover:border-gray-300 hover:shadow-md'}`}>
-                                <div className="absolute top-2.5 left-2.5 z-10" onClick={e => e.stopPropagation()}>
+                                {contentTab === 'images' && <div className="absolute top-2.5 left-2.5 z-10" onClick={e => e.stopPropagation()}>
                                   <label className="cursor-pointer">
                                     <input type="checkbox" checked={isChecked} onChange={() => setSelectedForGenerate(prev => { const next = new Set(prev); next.has(img.id) ? next.delete(img.id) : next.add(img.id); return next; })} className="sr-only" />
                                     <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-150 ${isChecked ? 'bg-purple-500 border-purple-500' : 'bg-white/80 border-gray-300 opacity-0 group-hover:opacity-100'}`}>
                                       {isChecked && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
                                     </div>
                                   </label>
-                                </div>
+                                </div>}
                                 {img.status === 'approved' && (
                                   <div className="absolute top-2 right-2 z-10">
                                     <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center shadow-md ring-2 ring-white">
@@ -1576,8 +1881,18 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                                   </div>
                                 )}
                                 <button type="button" onClick={() => setSelectedImage(img)} className="block w-full text-left">
-                                  <div className="aspect-square bg-gray-100 overflow-hidden">
-                                    <img src={thumbUrl(img.public_url, 300)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                  <div className="aspect-square bg-gray-100 overflow-hidden relative">
+                                    {img.content_type === 'video' ? (
+                                      <>
+                                        <video src={img.public_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                        <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 text-white text-[9px] font-bold uppercase">
+                                          <Video className="w-3 h-3" />
+                                          Video
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <img src={thumbUrl(img.public_url, 300)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                    )}
                                   </div>
                                   <div className="p-3">
                                     <p className="text-xs font-bold text-gray-900 truncate">{img.file_name}</p>
@@ -1642,8 +1957,17 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                                 </div>
                                 {/* Thumbnail */}
                                 <button type="button" onClick={() => setSelectedImage(img)} className="flex items-center gap-4 flex-1 text-left min-w-0">
-                                  <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden flex-shrink-0">
-                                    <img src={thumbUrl(img.public_url, 96)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                  <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden flex-shrink-0 relative">
+                                    {img.content_type === 'video' ? (
+                                      <>
+                                        <video src={img.public_url} className="w-full h-full object-cover" muted preload="metadata" />
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                          <Video className="w-4 h-4 text-white" />
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <img src={thumbUrl(img.public_url, 96)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                    )}
                                   </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-bold text-gray-900 truncate">{img.file_name}</p>
@@ -1691,7 +2015,14 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             )}
 
             {/* ── REVIEW QUEUE VIEW ── */}
-            {dashboardView === 'review' && (
+            {dashboardView === 'review' && contentTab === 'videos' && (
+              <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-12 text-center">
+                <Video className="w-12 h-12 text-violet-300 mx-auto mb-4" />
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Video Review Queue</h3>
+                <p className="text-sm text-gray-500">Coming soon — video review and approval will be available in a future update.</p>
+              </div>
+            )}
+            {dashboardView === 'review' && contentTab === 'images' && (
               galleryFolderFilter === 'unset' && !loading && images.length > 0 ? (
                 <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-8">
                   <div className="text-center mb-6">
@@ -2286,7 +2617,14 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             )}
 
             {/* ── SCHEDULE VIEW ── */}
-            {dashboardView === 'schedule' && (
+            {dashboardView === 'schedule' && contentTab === 'videos' && (
+              <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-12 text-center">
+                <Video className="w-12 h-12 text-violet-300 mx-auto mb-4" />
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Video Scheduling</h3>
+                <p className="text-sm text-gray-500">Coming soon — video scheduling will be available in a future update.</p>
+              </div>
+            )}
+            {dashboardView === 'schedule' && contentTab === 'images' && (
               galleryFolderFilter === 'unset' && !loading && images.length > 0 ? (
                 <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-8">
                   <div className="text-center mb-6">
@@ -2821,16 +3159,20 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col items-center gap-4">
             {uploadProgress.done < uploadProgress.total ? (
               <>
-                <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center">
-                  <Loader2 className="w-7 h-7 text-orange-500 animate-spin" />
+                <div className={`w-14 h-14 rounded-full flex items-center justify-center ${contentTab === 'videos' ? 'bg-violet-100' : 'bg-orange-100'}`}>
+                  <Loader2 className={`w-7 h-7 animate-spin ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`} />
                 </div>
                 <div className="text-center">
-                  <p className="text-base font-extrabold text-gray-900">Uploading images...</p>
-                  <p className="text-sm text-gray-500 mt-1">{uploadProgress.done} of {uploadProgress.total} done</p>
+                  <p className="text-base font-extrabold text-gray-900">
+                    {uploadByteProgress !== null && uploadByteProgress >= 95 ? 'Saving to library...' : `Uploading ${contentTab === 'videos' ? 'video' : 'images'}...`}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {uploadByteProgress !== null ? `${uploadByteProgress}%` : `${uploadProgress.done} of ${uploadProgress.total} done`}
+                  </p>
                   <p className="text-xs text-gray-400 mt-1 truncate max-w-[250px]">{uploadProgress.current}</p>
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-orange-500 to-rose-500 rounded-full transition-all duration-300" style={{ width: `${(uploadProgress.done / uploadProgress.total) * 100}%` }} />
+                  <div className={`h-full rounded-full transition-all duration-300 ${contentTab === 'videos' ? 'bg-gradient-to-r from-violet-500 to-purple-600' : 'bg-gradient-to-r from-orange-500 to-rose-500'}`} style={{ width: `${uploadByteProgress !== null ? uploadByteProgress : (uploadProgress.done / uploadProgress.total) * 100}%` }} />
                 </div>
                 <p className="text-[11px] text-gray-400">Please don't close this page until uploading is complete.</p>
               </>
@@ -2841,10 +3183,133 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                 </div>
                 <div className="text-center">
                   <p className="text-base font-extrabold text-gray-900">Upload complete!</p>
-                  <p className="text-sm text-gray-500 mt-1">{uploadProgress.total} image{uploadProgress.total !== 1 ? 's' : ''} uploaded successfully.</p>
+                  <p className="text-sm text-gray-500 mt-1">{uploadProgress.total} {contentTab === 'videos' ? 'video' : 'image'}{uploadProgress.total !== 1 ? 's' : ''} uploaded successfully.</p>
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Video Caption Results Modal ── */}
+      {showCaptionModal && videoGeneratedCaptions.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => { if (videoSelectedCaption === null) setShowCaptionModal(false); }} />
+          <div className="relative bg-white w-full max-w-5xl mx-auto rounded-2xl shadow-2xl border border-gray-200 overflow-hidden max-h-[85vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="relative flex-shrink-0 overflow-hidden">
+              <div className="absolute inset-0 bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600" />
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+              <div className="relative px-6 pt-6 pb-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+                      <Sparkles className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-white">
+                        {videoSelectedCaption !== null ? 'Edit Caption' : 'Generated Captions'}
+                      </h3>
+                      <p className="text-xs text-white/70">
+                        {videoSelectedCaption !== null ? 'Edit this caption before saving' : `${videoGeneratedCaptions.length} option${videoGeneratedCaptions.length > 1 ? 's' : ''} — pick one to use`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {videoSelectedCaption === null && (
+                      <button type="button" onClick={() => handleVideoGenerate()} disabled={videoGenerating}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-lg border border-white/20 transition">
+                        <RefreshCw className={`w-3.5 h-3.5 ${videoGenerating ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </button>
+                    )}
+                    <button type="button" onClick={() => { setShowCaptionModal(false); setVideoSelectedCaption(null); }}
+                      className="p-2 rounded-xl hover:bg-white/20 text-white/70 hover:text-white transition">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="px-6 py-5 overflow-y-auto flex-1">
+              {videoSelectedCaption !== null ? (
+                /* Edit view */
+                <div>
+                  <textarea
+                    value={videoEditCaption}
+                    onChange={e => setVideoEditCaption(e.target.value)}
+                    rows={8}
+                    className="w-full px-4 py-3 border-2 border-violet-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 text-sm resize-none"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-2">{videoEditCaption.length} characters</p>
+                </div>
+              ) : (
+                /* Caption cards */
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {videoGeneratedCaptions.map((caption, idx) => (
+                    <button key={idx} type="button"
+                      onClick={() => { setVideoSelectedCaption(idx); setVideoEditCaption(caption); }}
+                      className="w-full text-left rounded-2xl border-2 border-gray-100 hover:border-violet-400 bg-white hover:bg-gradient-to-b hover:from-violet-50/80 hover:to-white hover:-translate-y-1 hover:shadow-lg hover:shadow-violet-100/50 transition-all duration-300 group flex flex-col overflow-hidden">
+                      {/* Card top accent */}
+                      <div className={`h-1 w-full bg-gradient-to-r ${idx % 3 === 0 ? 'from-violet-400 to-purple-500' : idx % 3 === 1 ? 'from-purple-400 to-indigo-500' : 'from-indigo-400 to-violet-500'}`} />
+                      <div className="p-5 flex flex-col flex-1">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-7 h-7 rounded-lg text-xs font-bold flex items-center justify-center flex-shrink-0 text-white ${idx % 3 === 0 ? 'bg-violet-500' : idx % 3 === 1 ? 'bg-purple-500' : 'bg-indigo-500'}`}>
+                              {idx + 1}
+                            </span>
+                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Caption {idx + 1}</span>
+                          </div>
+                        </div>
+                        <p className="text-[13px] text-gray-600 leading-relaxed flex-1">{caption}</p>
+                        <div className="flex items-center justify-center mt-4 pt-3 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-violet-600 bg-violet-50 rounded-lg">
+                            <Pencil className="w-3 h-3" /> Select & Edit
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-gray-100 flex-shrink-0">
+              {videoSelectedCaption !== null ? (
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => { setVideoSelectedCaption(null); setVideoEditCaption(''); }}
+                    className="flex-1 px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition">
+                    Back to Options
+                  </button>
+                  <button type="button"
+                    onClick={async () => {
+                      if (!videoEditCaption.trim() || !selectedImage) return;
+                      await supabase.from('image_content').update({ caption: videoEditCaption.trim() }).eq('id', selectedImage.id);
+                      const updated = { ...selectedImage, caption: videoEditCaption.trim() };
+                      setSelectedImage(updated);
+                      setImages(prev => prev.map(i => i.id === selectedImage.id ? updated : i));
+                      setVideoCaptionSaved(true);
+                      setTimeout(() => {
+                        setVideoCaptionSaved(false);
+                        setShowCaptionModal(false);
+                        setVideoSelectedCaption(null);
+                      }, 1500);
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 rounded-xl shadow-md shadow-violet-600/20 transition">
+                    {videoCaptionSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                    {videoCaptionSaved ? 'Saved!' : 'Save Caption'}
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
+                  <Sparkles className="w-3.5 h-3.5 text-violet-300" />
+                  <span>Click a caption to select and edit it before saving</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

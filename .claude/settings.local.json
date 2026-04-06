@@ -6,7 +6,8 @@
       "Bash(git config:*)",
       "WebFetch(domain:groundstandard.netlify.app)",
       "Bash(find c:UsersOngoingDesktopgroundstandardgroundstandardpublic -type f \\\\\\(-iname *.png -o -iname *.jpg -o -iname *.jpeg -o -iname *.gif -o -iname *.svg -o -iname *.webp \\\\\\))",
-      "Bash(grep -n \"scheduled_posts\\\\|form_submissions\\\\|brand_profiles\\\\|image_content\\\\|folders\\\\|Research\" /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/components/*.tsx /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/hooks/*.ts)"
+      "Bash(grep -n \"scheduled_posts\\\\|form_submissions\\\\|brand_profiles\\\\|image_content\\\\|folders\\\\|Research\" /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/components/*.tsx /c/Users/Ongoing/Desktop/groundstandard/groundstandard/src/hooks/*.ts)",
+      "Bash(node -e \"const ts = require\\('typescript'\\); const p = ts.createProgram\\(['src/components/ImageContentEditor.tsx'], {jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true, moduleResolution: ts.ModuleResolutionKind.Bundler, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, strict: false, skipLibCheck: true, noEmit: true}\\); const d = ts.getPreEmitDiagnostics\\(p\\); d.forEach\\(dd => console.log\\(ts.flattenDiagnosticMessageText\\(dd.messageText, '\\\\n'\\), dd.file?.fileName, dd.start\\)\\);\")"
     ]
   }
 }

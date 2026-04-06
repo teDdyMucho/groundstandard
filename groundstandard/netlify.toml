@@ -37,6 +37,12 @@
   force = true
 
 [[redirects]]
+  from = "/api/video-caption"
+  to = "https://groundstandard.app.n8n.cloud/webhook/video-caption"
+  status = 200
+  force = true
+
+[[redirects]]
   from = "/api/image-batch"
   to = "https://groundstandard.app.n8n.cloud/webhook/image-batch"
   status = 200

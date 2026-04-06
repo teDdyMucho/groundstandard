@@ -36,6 +36,12 @@ export default defineConfig({
         secure: true,
         rewrite: (path) => path.replace(/^\/api\/chat-bot/, '/webhook/chat-bot'),
       },
+      '/api/video-caption': {
+        target: 'https://groundstandard.app.n8n.cloud',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/video-caption/, '/webhook/video-caption'),
+      },
       '/api/image-batch': {
         target: 'https://groundstandard.app.n8n.cloud',
         changeOrigin: true,
