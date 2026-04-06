@@ -53,6 +53,7 @@ type BrandProfile = {
   industry: string;
   location: string;
   target_audience: string;
+  additional_instructions: string;
 };
 
 type SavedBrandProfile = BrandProfile & { id: string; name: string };
@@ -64,6 +65,7 @@ const DEFAULT_BRAND_PROFILE: BrandProfile = {
   industry: '',
   location: '',
   target_audience: '',
+  additional_instructions: '',
 };
 
 function loadBrandProfile(): BrandProfile {
@@ -144,6 +146,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [profileNameInput, setProfileNameInput] = useState('');
   const [profileNameWarning, setProfileNameWarning] = useState<string | null>(null);
+  const [showAdditionalInstructions, setShowAdditionalInstructions] = useState(false);
   const [profileModalView, setProfileModalView] = useState<'picker' | 'form'>('picker');
 
   const fetchSavedProfiles = useCallback(async () => {
@@ -192,6 +195,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
     setBrandProfile(rest as BrandProfile);
     setActiveProfileId(id);
     setProfileNameInput(name);
+    setShowAdditionalInstructions(!!rest.additional_instructions);
     localStorage.setItem(BRAND_PROFILE_KEY, JSON.stringify(rest));
   }, []);
 
@@ -653,6 +657,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
         industry: brandProfile.industry,
         location: brandProfile.location,
         target_audience: brandProfile.target_audience,
+        additional_instructions: brandProfile.additional_instructions,
       },
     };
 
@@ -732,6 +737,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
       industry: brandProfile.industry,
       location: brandProfile.location,
       target_audience: brandProfile.target_audience,
+      additional_instructions: brandProfile.additional_instructions,
     };
     for (let i = 0; i < toGenerate.length; i += CHUNK_SIZE) {
       const chunk = toGenerate.slice(i, i + CHUNK_SIZE);
@@ -1005,11 +1011,31 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                     <label className="block text-sm font-bold text-gray-900 mb-1.5">Target Audience</label>
                     <input type="text" value={brandProfile.target_audience} onChange={e => setBrandProfile(p => ({ ...p, target_audience: e.target.value }))} placeholder="e.g. People interested in training Brazilian Jiu-Jitsu" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500 text-sm" />
                   </div>
+
+                  {/* Additional Instructions - collapsible */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdditionalInstructions(prev => !prev)}
+                      className="inline-flex items-center gap-2 text-sm font-bold text-orange-600 hover:text-orange-700 transition-colors"
+                    >
+                      <span className={`w-5 h-5 rounded-md bg-orange-100 flex items-center justify-center text-orange-600 transition-transform duration-200 ${showAdditionalInstructions ? 'rotate-45' : ''}`}>+</span>
+                      Additional Instructions
+                    </button>
+                    {!showAdditionalInstructions && (
+                      <p className="text-xs text-gray-400 mt-1.5 ml-7">Add custom instructions to guide how AI generates content for this brand profile.</p>
+                    )}
+                    {showAdditionalInstructions && (
+                      <div className="mt-2">
+                        <p className="text-xs text-gray-500 mb-2">These instructions will be included every time AI generates content using this brand profile.</p>
+                        <textarea value={brandProfile.additional_instructions} onChange={e => setBrandProfile(p => ({ ...p, additional_instructions: e.target.value }))} placeholder="e.g. Always include a call-to-action. Use hashtags related to BJJ. Keep captions under 200 words." rows={3} className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-orange-500/30 focus:border-orange-500 text-sm resize-none" />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Modal Footer */}
-                <div className="sticky bottom-0 bg-white border-t border-gray-100 px-6 py-4 rounded-b-2xl flex items-center justify-between">
-                  <p className="text-xs text-gray-400">Saved to database</p>
+                <div className="sticky bottom-0 bg-white border-t border-gray-100 px-6 py-4 rounded-b-2xl flex items-center justify-end">
                   <button
                     type="button"
                     onClick={async () => { await saveBrandProfile(); if (!profileNameWarning) setProfileModalView('picker'); }}
