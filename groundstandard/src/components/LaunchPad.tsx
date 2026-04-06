@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { ArrowRight, ClipboardList, FileText, UserCircle, X, Eye, LogOut, Globe, Image as ImageIcon, RefreshCw, Zap, Layers, ExternalLink, Target, Lightbulb, TrendingUp, Shield, BarChart3, Users, Cpu, Clock } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -45,6 +45,21 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
   const [profileSaveSuccess, setProfileSaveSuccess] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [userName, setUserName] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.rpc('rpc_profile_get').then(({ data }) => {
+      const row = Array.isArray(data) ? data[0] : null;
+      if (row?.full_name) setUserName(row.full_name);
+    });
+  }, []);
+
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
+  })();
 
   const openAccountModal = useCallback(async () => {
     setShowAccountModal(true);
@@ -272,6 +287,10 @@ export default function LaunchPad({ onLaunchArticleGenerator, onLaunchFormSubmis
           </div>
 
           <div className="relative">
+            {/* Welcome message */}
+            <p className="text-base sm:text-lg text-gray-500 mb-3">
+              {greeting}{userName ? `, ${userName}` : ''}! Welcome back.
+            </p>
             <div className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg shadow-blue-600/25 text-white text-xs font-bold uppercase tracking-widest mb-8">
               <Zap className="w-3.5 h-3.5" />
               Content Management Platform
