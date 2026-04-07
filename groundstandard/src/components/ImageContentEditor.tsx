@@ -114,6 +114,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
   const [videoEditCaption, setVideoEditCaption] = useState('');
   const [videoCaptionSaved, setVideoCaptionSaved] = useState(false);
   const [showCaptionModal, setShowCaptionModal] = useState(false);
+  const [uploadRejection, setUploadRejection] = useState<{ count: number; type: 'image' | 'video' } | null>(null);
   const [scheduleTimeFrom, setScheduleTimeFrom] = useState<Date | null>(null);
   const [scheduleTimeTo, setScheduleTimeTo] = useState<Date | null>(null);
   const [scheduleFrequency, setScheduleFrequency] = useState<number | null>(null);
@@ -511,9 +512,18 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
 
   // Single upload — auto-selects the new image
   const handleUpload = useCallback(async (file: File) => {
+    const isVideo = file.type.startsWith('video/') || isVideoFile(file.name);
+    // Only reject if clearly wrong type (video on images tab, or image on videos tab)
+    if (contentTab === 'videos' && !isVideo && file.type.startsWith('image/')) {
+      setUploadRejection({ count: 1, type: 'image' });
+      return;
+    }
+    if (contentTab === 'images' && isVideo) {
+      setUploadRejection({ count: 1, type: 'video' });
+      return;
+    }
     setUploading(true);
     setUploadProgress({ total: 1, done: 0, current: file.name });
-    const isVideo = file.type.startsWith('video/') || isVideoFile(file.name);
     let row: ImageRecord | null;
     if (isVideo) {
       setUploadByteProgress(0);
@@ -554,11 +564,20 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    const files = Array.from(e.dataTransfer.files).filter(f =>
+    const allFiles = Array.from(e.dataTransfer.files);
+    const files = allFiles.filter(f =>
       contentTab === 'videos'
         ? (f.type.startsWith('video/') || isVideoFile(f.name))
         : f.type.startsWith('image/')
     );
+    const rejected = allFiles.length - files.length;
+    if (rejected > 0 && files.length === 0) {
+      setUploadRejection({ count: rejected, type: contentTab === 'videos' ? 'image' : 'video' });
+      return;
+    }
+    if (rejected > 0) {
+      setUploadRejection({ count: rejected, type: contentTab === 'videos' ? 'image' : 'video' });
+    }
     if (!files.length) return;
     if (files.length === 1) { handleUpload(files[0]); return; }
     processBatchUpload(files);
@@ -776,8 +795,11 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
     setGenerateProgress({ total: 1, done: 0, current: img.file_name, failed: 0 });
     try {
       await sendToWebhook(action, img);
-      setGenerateProgress({ total: 1, done: 1, current: '', failed: 0 });
-      setWebhookResult({ type: 'success', message: `"${action}" completed successfully!` });
+      // Don't mark done immediately — n8n returned 200 but processing is still ongoing.
+      // Hand off to the batch polling loop which polls DB until status = completed/approved.
+      batchIdsRef.current = [img.id];
+      localStorage.setItem('gs_active_batch', JSON.stringify([img.id]));
+      setBatchGenerating(true);
     } catch (err) {
       console.error('Webhook error:', err);
       setGenerateProgress(null);
@@ -787,7 +809,6 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
       setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'uploaded' } : i));
     } finally {
       setGeneratingContent(null);
-      setTimeout(() => setGenerateProgress(null), 4000);
     }
   }, [sendToWebhook]);
 
@@ -2085,13 +2106,13 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                               type="checkbox"
                               checked={allSelected}
                               onChange={() => allSelected ? setSelectedForExport(new Set()) : setSelectedForExport(new Set(queueImgs.map(i => i.id)))}
-                              className="w-4 h-4 accent-orange-500 cursor-pointer"
+                              className={`w-4 h-4 ${contentTab === 'videos' ? 'accent-violet-500' : 'accent-orange-500'} cursor-pointer`}
                             />
                             <span className="text-sm font-bold text-gray-800">
                               {allSelected ? 'Deselect All' : 'Select All'} ({queueImgs.length})
                             </span>
                             {exportable.length > 0 && (
-                              <span className="px-2 py-0.5 text-[11px] font-bold bg-orange-100 text-orange-600 rounded-full">{exportable.length} selected</span>
+                              <span className={`px-2 py-0.5 text-[11px] font-bold rounded-full ${contentTab === 'videos' ? 'bg-violet-100 text-violet-600' : 'bg-orange-100 text-orange-600'}`}>{exportable.length} selected</span>
                             )}
                           </label>
                           {exportable.length > 0 && (() => {
@@ -2142,16 +2163,16 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                       <div className="flex items-center gap-3 px-5 py-3 flex-wrap">
                         {/* Date */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">Date <span className="text-red-400">*</span></span>
-                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${exportSchedule ? 'border-orange-300' : 'border-red-200'}`}>
-                            <Calendar className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>Date <span className="text-red-400">*</span></span>
+                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${exportSchedule ? (contentTab === 'videos' ? 'border-violet-300' : 'border-orange-300') : (contentTab === 'videos' ? 'border-violet-200' : 'border-red-200')}`}>
+                            <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                             <DatePicker
                               selected={exportSchedule}
                               onChange={(date: Date | null) => setExportSchedule(date)}
                               dateFormat="MMM d, yyyy"
                               placeholderText="Required"
                               className="text-sm font-semibold text-gray-700 bg-transparent focus:outline-none w-[100px] cursor-pointer"
-                              popperClassName="custom-datepicker-popper"
+                              popperClassName={contentTab === 'videos' ? 'video-datepicker-popper' : 'custom-datepicker-popper'}
                             />
                             {exportSchedule && (
                               <button type="button" onClick={() => setExportSchedule(null)} className="ml-1 text-gray-300 hover:text-gray-500 transition">
@@ -2162,16 +2183,16 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         </div>
                         {/* From */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">From <span className="text-red-400">*</span></span>
-                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${scheduleTimeFrom ? 'border-orange-300' : 'border-red-200'}`}>
-                            <Clock className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>From <span className="text-red-400">*</span></span>
+                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${scheduleTimeFrom ? (contentTab === 'videos' ? 'border-violet-300' : 'border-orange-300') : (contentTab === 'videos' ? 'border-violet-200' : 'border-red-200')}`}>
+                            <Clock className={`w-3.5 h-3.5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                             <DatePicker
                               selected={scheduleTimeFrom}
                               onChange={(date: Date | null) => setScheduleTimeFrom(date)}
                               showTimeSelect showTimeSelectOnly timeIntervals={15} timeCaption="From" dateFormat="hh:mm aa"
                               placeholderText="Required"
                               className="text-sm font-semibold text-gray-700 bg-transparent focus:outline-none w-[75px] cursor-pointer"
-                              popperClassName="custom-datepicker-popper"
+                              popperClassName={contentTab === 'videos' ? 'video-datepicker-popper' : 'custom-datepicker-popper'}
                             />
                             {scheduleTimeFrom && (
                               <button type="button" onClick={() => setScheduleTimeFrom(null)} className="ml-1 text-gray-300 hover:text-gray-500 transition">
@@ -2182,16 +2203,16 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         </div>
                         {/* To */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">To <span className="text-red-400">*</span></span>
-                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${scheduleTimeTo ? 'border-orange-300' : 'border-red-200'}`}>
-                            <Clock className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>To <span className="text-red-400">*</span></span>
+                          <div className={`flex items-center gap-1 bg-white border-2 rounded-xl px-3 py-1.5 shadow-sm transition ${scheduleTimeTo ? (contentTab === 'videos' ? 'border-violet-300' : 'border-orange-300') : (contentTab === 'videos' ? 'border-violet-200' : 'border-red-200')}`}>
+                            <Clock className={`w-3.5 h-3.5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                             <DatePicker
                               selected={scheduleTimeTo}
                               onChange={(date: Date | null) => setScheduleTimeTo(date)}
                               showTimeSelect showTimeSelectOnly timeIntervals={15} timeCaption="To" dateFormat="hh:mm aa"
                               placeholderText="Required"
                               className="text-sm font-semibold text-gray-700 bg-transparent focus:outline-none w-[75px] cursor-pointer"
-                              popperClassName="custom-datepicker-popper"
+                              popperClassName={contentTab === 'videos' ? 'video-datepicker-popper' : 'custom-datepicker-popper'}
                             />
                             {scheduleTimeTo && (
                               <button type="button" onClick={() => setScheduleTimeTo(null)} className="ml-1 text-gray-300 hover:text-gray-500 transition">
@@ -2202,18 +2223,18 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         </div>
                         {/* Every */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">Every (days) *</span>
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>Every (days) *</span>
                           <input
                             type="number" min={1}
                             value={scheduleFrequency ?? ''}
                             placeholder="–"
                             onChange={e => { const v = parseInt(e.target.value); setScheduleFrequency(isNaN(v) ? null : Math.max(1, v)); }}
-                            className={`w-14 px-2 py-1.5 text-sm font-semibold border-2 rounded-xl focus:outline-none focus:border-orange-400 bg-white text-center ${scheduleFrequency === null ? 'border-orange-300 placeholder-orange-300' : 'border-gray-200'}`}
+                            className={`w-14 px-2 py-1.5 text-sm font-semibold border-2 rounded-xl focus:outline-none bg-white text-center ${contentTab === 'videos' ? 'focus:border-violet-400' : 'focus:border-orange-400'} ${scheduleFrequency === null ? (contentTab === 'videos' ? 'border-violet-300 placeholder-violet-300' : 'border-orange-300 placeholder-orange-300') : 'border-gray-200'}`}
                           />
                         </div>
                         {/* Timezone */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">Timezone *</span>
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>Timezone *</span>
                           <select
                             value={scheduleTimezone}
                             onChange={e => {
@@ -2234,7 +2255,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                               }
                               setScheduleTimezone(newTz);
                             }}
-                            className={`px-2 py-1.5 text-sm font-semibold border-2 rounded-xl focus:outline-none focus:border-orange-400 bg-white ${!scheduleTimezone ? 'border-orange-300 text-gray-400' : 'border-gray-200'}`}
+                            className={`px-2 py-1.5 text-sm font-semibold border-2 rounded-xl focus:outline-none bg-white ${contentTab === 'videos' ? 'focus:border-violet-400' : 'focus:border-orange-400'} ${!scheduleTimezone ? (contentTab === 'videos' ? 'border-violet-300 text-gray-400' : 'border-orange-300 text-gray-400') : 'border-gray-200'}`}
                           >
                             <option value="">Select timezone</option>
                             <option value="America/New_York">Eastern (ET)</option>
@@ -2256,7 +2277,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                         </div>
                         {/* Recycle */}
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[9px] font-extrabold text-orange-500 uppercase tracking-wider">Recycle</span>
+                          <span className={`text-[9px] font-extrabold uppercase tracking-wider ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>Recycle</span>
                           <button
                             type="button"
                             onClick={() => setExportRecycle(r => !r)}
@@ -2292,7 +2313,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                               toStr,
                               scheduleTimezone,
                               i.comment || '',
-                              'Photo',
+                              contentTab === 'videos' ? 'Video' : 'Photo',
                               'TRUE',
                             ].map(v => `"${String(v).replace(/"/g, '""')}"`));
                             const csv = [header, ...rows].map(r => r.join(',')).join('\n');
@@ -2302,7 +2323,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             a.href = url; a.download = `posts-${new Date().toISOString().slice(0, 10)}.csv`;
                             a.click(); URL.revokeObjectURL(url);
                           }}
-                          className="inline-flex items-center gap-2 px-5 py-2 text-sm font-extrabold text-white bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600 rounded-xl shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          className={`inline-flex items-center gap-2 px-5 py-2 text-sm font-extrabold text-white rounded-xl shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed ${contentTab === 'videos' ? 'bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700' : 'bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-600 hover:to-rose-600'}`}
                         >
                           <span className="flex flex-col items-start leading-tight">
                             <span>{sendingToN8n ? 'Saving…' : `Export CSV${exportable.length > 0 ? ` (${exportable.length})` : ''}`}</span>
@@ -2351,7 +2372,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             <div className="absolute top-2 left-2" onClick={e => e.stopPropagation()}>
                               <input type="checkbox" checked={selectedForExport.has(img.id)}
                                 onChange={() => setSelectedForExport(prev => { const next = new Set(prev); next.has(img.id) ? next.delete(img.id) : next.add(img.id); return next; })}
-                                className="w-4 h-4 accent-orange-500 cursor-pointer rounded shadow" />
+                                className={`w-4 h-4 ${contentTab === 'videos' ? 'accent-violet-500' : 'accent-orange-500'} cursor-pointer rounded shadow`} />
                             </div>
                           </div>
                           <div className="flex-1 p-5">
@@ -2423,9 +2444,9 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   );
                 })() : (
                   <>
-                  <div className="flex items-center gap-2 px-1 py-2 bg-orange-50 rounded-xl border border-orange-100">
-                    <Download className="w-3.5 h-3.5 text-orange-400 flex-shrink-0" />
-                    <p className="text-[11px] text-orange-600 font-semibold">Check the images you want to include in the CSV export, then click <span className="font-extrabold">Export CSV</span>.</p>
+                  <div className={`flex items-center gap-2 px-1 py-2 rounded-xl border ${contentTab === 'videos' ? 'bg-violet-50 border-violet-100' : 'bg-orange-50 border-orange-100'}`}>
+                    <Download className={`w-3.5 h-3.5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
+                    <p className={`text-[11px] font-semibold ${contentTab === 'videos' ? 'text-violet-600' : 'text-orange-600'}`}>Check the {contentTab === 'videos' ? 'videos' : 'images'} you want to include in the CSV export, then click <span className="font-extrabold">Export CSV</span>.</p>
                   </div>
                   {(() => {
                     const reviewFiltered = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
@@ -2694,7 +2715,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                                   onClick={() => { setScheduleFilter(val); setSchedulePage(1); }}
                                   className={`flex items-center gap-1.5 px-3 py-1 text-xs font-bold rounded-lg transition-all ${scheduleFilter === val ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                                   {label}
-                                  <span className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-full ${scheduleFilter === val ? (val === 'approved' ? 'bg-green-100 text-green-700' : val === 'not_approved' ? 'bg-gray-200 text-gray-600' : 'bg-orange-100 text-orange-600') : 'bg-gray-200 text-gray-500'}`}>{count}</span>
+                                  <span className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-full ${scheduleFilter === val ? (val === 'approved' ? 'bg-green-100 text-green-700' : val === 'not_approved' ? 'bg-gray-200 text-gray-600' : contentTab === 'videos' ? 'bg-violet-100 text-violet-600' : 'bg-orange-100 text-orange-600') : 'bg-gray-200 text-gray-500'}`}>{count}</span>
                                 </button>
                               ))}
                             </div>
@@ -2752,7 +2773,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                                 {first !== last && <><span className="text-gray-400">→</span><span className="font-semibold text-gray-700">{fmt(last)}</span></>}
                                 <span className="text-gray-400">·</span>
                                 <span className="text-gray-500">{span} day{span !== 1 ? 's' : ''} total</span>
-                                {perDayLabel && <><span className="text-gray-300">|</span><span className="font-semibold text-orange-500">{perDayLabel}</span></>}
+                                {perDayLabel && <><span className="text-gray-300">|</span><span className={`font-semibold ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`}>{perDayLabel}</span></>}
                               </div>
                             );
                           })()}
@@ -2802,13 +2823,13 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                                 <div className="p-3 space-y-2">
                                   <p className="text-sm font-bold text-gray-900 truncate">{img.brand_profile_name || img.file_name}</p>
                                   <div className="flex items-center gap-2">
-                                    <div className={`flex-1 flex items-center gap-1.5 px-3 py-2 rounded-xl border ${isOverdue ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'}`}>
-                                      <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${isOverdue ? 'text-red-400' : 'text-orange-400'}`} />
-                                      <span className={`text-xs font-bold ${isOverdue ? 'text-red-700' : 'text-orange-700'}`}>{datePart || '—'}</span>
+                                    <div className={`flex-1 flex items-center gap-1.5 px-3 py-2 rounded-xl border ${isOverdue ? 'bg-red-50 border-red-200' : contentTab === 'videos' ? 'bg-violet-50 border-violet-200' : 'bg-orange-50 border-orange-200'}`}>
+                                      <Calendar className={`w-3.5 h-3.5 flex-shrink-0 ${isOverdue ? 'text-red-400' : contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
+                                      <span className={`text-xs font-bold ${isOverdue ? 'text-red-700' : contentTab === 'videos' ? 'text-violet-700' : 'text-orange-700'}`}>{datePart || '—'}</span>
                                     </div>
-                                    <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border ${isOverdue ? 'bg-red-50 border-red-200' : 'bg-orange-50 border-orange-200'}`}>
-                                      <Clock className={`w-3.5 h-3.5 flex-shrink-0 ${isOverdue ? 'text-red-400' : 'text-orange-400'}`} />
-                                      <span className={`text-xs font-bold ${isOverdue ? 'text-red-700' : 'text-orange-700'}`}>{timePart || '—'}</span>
+                                    <div className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border ${isOverdue ? 'bg-red-50 border-red-200' : contentTab === 'videos' ? 'bg-violet-50 border-violet-200' : 'bg-orange-50 border-orange-200'}`}>
+                                      <Clock className={`w-3.5 h-3.5 flex-shrink-0 ${isOverdue ? 'text-red-400' : contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
+                                      <span className={`text-xs font-bold ${isOverdue ? 'text-red-700' : contentTab === 'videos' ? 'text-violet-700' : 'text-orange-700'}`}>{timePart || '—'}</span>
                                     </div>
                                   </div>
                                   {scheduledTimings[img.id] && (
@@ -2908,12 +2929,12 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             <div className="px-6 py-5 border-b border-gray-100">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-rose-400 flex items-center justify-center shadow-md">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md ${contentTab === 'videos' ? 'bg-gradient-to-br from-violet-500 to-purple-600' : 'bg-gradient-to-br from-orange-400 to-rose-400'}`}>
                     <Folder className="w-5 h-5 text-white" />
                   </div>
                   <div>
                     <h2 className="text-lg font-extrabold text-gray-900">Folders</h2>
-                    <p className="text-xs text-gray-500">{folders.length} folder{folders.length !== 1 ? 's' : ''} · {images.length} total images</p>
+                    <p className="text-xs text-gray-500">{folders.length} folder{folders.length !== 1 ? 's' : ''} · {images.filter(i => contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video').length} total {contentTab === 'videos' ? 'videos' : 'images'}</p>
                   </div>
                 </div>
                 <button type="button" onClick={() => { setShowFolderPicker(false); setShowNewFolderInput(false); setNewFolderName(''); setEditingFolderId(null); }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition">
@@ -2924,14 +2945,14 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             {/* Options */}
             <div className="px-5 py-4 space-y-2 max-h-[60vh] overflow-y-auto">
               {folders.map(f => {
-                const count = images.filter(i => i.folder_id === f.id).length;
+                const count = images.filter(i => i.folder_id === f.id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')).length;
                 const isEditing = editingFolderId === f.id;
                 const isActive = galleryFolderFilter === f.id;
                 return (
-                  <div key={f.id} className={`w-full flex items-center gap-3 px-5 py-4 rounded-xl border-2 text-left transition ${isActive ? 'border-orange-400 bg-orange-50' : 'border-gray-200 bg-gray-50 hover:border-orange-300 hover:bg-orange-50/40'}`}>
+                  <div key={f.id} className={`w-full flex items-center gap-3 px-5 py-4 rounded-xl border-2 text-left transition ${isActive ? (contentTab === 'videos' ? 'border-violet-400 bg-violet-50' : 'border-orange-400 bg-orange-50') : (contentTab === 'videos' ? 'border-gray-200 bg-gray-50 hover:border-violet-300 hover:bg-violet-50/40' : 'border-gray-200 bg-gray-50 hover:border-orange-300 hover:bg-orange-50/40')}`}>
                     {isEditing ? (
                       <div className="flex items-center gap-2 flex-1">
-                        <Folder className="w-5 h-5 text-orange-400 flex-shrink-0" />
+                        <Folder className={`w-5 h-5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                         <input
                           type="text"
                           value={editingFolderName}
@@ -2941,7 +2962,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             if (e.key === 'Escape') { setEditingFolderId(null); setEditingFolderName(''); }
                           }}
                           autoFocus
-                          className="flex-1 px-3 py-1.5 text-sm font-bold border-2 border-orange-300 rounded-lg focus:outline-none focus:border-orange-500 bg-white"
+                          className={`flex-1 px-3 py-1.5 text-sm font-bold border-2 rounded-lg focus:outline-none bg-white ${contentTab === 'videos' ? 'border-violet-300 focus:border-violet-500' : 'border-orange-300 focus:border-orange-500'}`}
                         />
                         <button type="button" disabled={!editingFolderName.trim()} onClick={() => renameFolder(f.id, editingFolderName)}
                           className="px-3 py-1.5 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition disabled:opacity-40">
@@ -2958,10 +2979,10 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                           onClick={() => { setGalleryFolderFilter(f.id); setShowFolderPicker(false); }}
                           onKeyDown={e => e.key === 'Enter' && (setGalleryFolderFilter(f.id), setShowFolderPicker(false))}
                           className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
-                          <Folder className="w-5 h-5 text-orange-400 flex-shrink-0" />
+                          <Folder className={`w-5 h-5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                           <div className="flex-1 min-w-0">
                             <span className="text-sm font-bold text-gray-900 truncate block">{f.name}</span>
-                            <p className="text-[11px] text-gray-400">{count} image{count !== 1 ? 's' : ''} · Created {new Date(f.created_at).toLocaleDateString()}</p>
+                            <p className="text-[11px] text-gray-400">{count} {contentTab === 'videos' ? 'video' : 'image'}{count !== 1 ? 's' : ''} · Created {new Date(f.created_at).toLocaleDateString()}</p>
                           </div>
                         </div>
                         <span className="text-sm font-extrabold text-gray-400 flex-shrink-0">{count}</span>
@@ -2978,12 +2999,23 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   </div>
                 );
               })}
+              {/* Unfiled option */}
+              {images.some(i => !i.folder_id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')) && (
+                <button type="button" onClick={() => { setGalleryFolderFilter(null); setShowFolderPicker(false); setDashboardView('gallery'); }}
+                  className={`w-full flex items-center gap-3 px-5 py-4 rounded-xl border-2 border-dashed text-left transition ${galleryFolderFilter === null ? 'border-gray-400 bg-gray-50' : 'border-gray-200 bg-gray-50/50 hover:border-gray-300'}`}>
+                  <Folder className="w-5 h-5 text-gray-300 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-gray-600">Unfiled</p>
+                    <p className="text-[11px] text-gray-400">{images.filter(i => !i.folder_id && (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video')).length} {contentTab === 'videos' ? 'videos' : 'images'}</p>
+                  </div>
+                </button>
+              )}
             </div>
             {/* Footer — New Folder */}
             <div className="px-5 pb-5 pt-3 border-t border-gray-100">
               {showNewFolderInput ? (
                 <div className="flex items-center gap-2 mt-1">
-                  <FolderPlus className="w-5 h-5 text-orange-400 flex-shrink-0" />
+                  <FolderPlus className={`w-5 h-5 flex-shrink-0 ${contentTab === 'videos' ? 'text-violet-400' : 'text-orange-400'}`} />
                   <input
                     type="text"
                     value={newFolderName}
@@ -2994,10 +3026,10 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                     }}
                     placeholder="Folder name"
                     autoFocus
-                    className="flex-1 px-3 py-2.5 text-sm font-semibold border-2 border-gray-200 rounded-xl focus:outline-none focus:border-orange-400"
+                    className={`flex-1 px-3 py-2.5 text-sm font-semibold border-2 border-gray-200 rounded-xl focus:outline-none ${contentTab === 'videos' ? 'focus:border-violet-400' : 'focus:border-orange-400'}`}
                   />
                   <button type="button" disabled={!newFolderName.trim()} onClick={() => { createFolder(newFolderName); setNewFolderName(''); setShowNewFolderInput(false); }}
-                    className="px-4 py-2.5 text-sm font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed">
+                    className={`px-4 py-2.5 text-sm font-bold text-white rounded-xl transition disabled:opacity-40 disabled:cursor-not-allowed ${contentTab === 'videos' ? 'bg-violet-500 hover:bg-violet-600' : 'bg-orange-500 hover:bg-orange-600'}`}>
                     Create
                   </button>
                   <button type="button" onClick={() => { setShowNewFolderInput(false); setNewFolderName(''); }} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-xl transition">
@@ -3006,7 +3038,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                 </div>
               ) : (
                 <button type="button" onClick={() => setShowNewFolderInput(true)}
-                  className="mt-1 w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-orange-600 border-2 border-dashed border-orange-300 hover:border-orange-400 hover:bg-orange-50 rounded-xl transition">
+                  className={`mt-1 w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold border-2 border-dashed rounded-xl transition ${contentTab === 'videos' ? 'text-violet-600 border-violet-300 hover:border-violet-400 hover:bg-violet-50' : 'text-orange-600 border-orange-300 hover:border-orange-400 hover:bg-orange-50'}`}>
                   <FolderPlus className="w-4 h-4" /> New Folder
                 </button>
               )}
@@ -3184,6 +3216,41 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Upload Rejection Modal ── */}
+      {uploadRejection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setUploadRejection(null)} />
+          <div className="relative bg-white w-full max-w-sm mx-auto rounded-2xl shadow-2xl border border-gray-200 p-6 text-center">
+            <div className={`w-14 h-14 mx-auto mb-4 rounded-full flex items-center justify-center ${contentTab === 'videos' ? 'bg-violet-100' : 'bg-orange-100'}`}>
+              <X className={`w-7 h-7 ${contentTab === 'videos' ? 'text-violet-500' : 'text-orange-500'}`} />
+            </div>
+            <h3 className="text-base font-bold text-gray-900 mb-2">
+              {uploadRejection.type === 'video' ? 'Video files not allowed here' : 'Image files not allowed here'}
+            </h3>
+            <p className="text-sm text-gray-500 mb-5">
+              {uploadRejection.type === 'video'
+                ? `You're on the Images tab. Switch to the Videos tab to upload video files.`
+                : `You're on the Videos tab. Switch to the Images tab to upload image files.`}
+              {uploadRejection.count > 1 && ` (${uploadRejection.count} files rejected)`}
+            </p>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={() => setUploadRejection(null)}
+                className="flex-1 px-4 py-2.5 text-sm font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition">
+                Got it
+              </button>
+              <button type="button" onClick={() => {
+                setUploadRejection(null);
+                setContentTab(uploadRejection.type === 'video' ? 'videos' : 'images');
+                setDashboardView('gallery');
+              }}
+                className={`flex-1 px-4 py-2.5 text-sm font-bold text-white rounded-xl shadow-sm transition ${uploadRejection.type === 'video' ? 'bg-violet-600 hover:bg-violet-700' : 'bg-orange-500 hover:bg-orange-600'}`}>
+                Switch to {uploadRejection.type === 'video' ? 'Videos' : 'Images'}
+              </button>
+            </div>
           </div>
         </div>
       )}
