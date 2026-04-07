@@ -709,9 +709,9 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
   }, []);
 
   // Convert Supabase URL to shareable Netlify URL (shows groundstandard.netlify.app on social media)
-  const toShareUrl = useCallback((publicUrl: string) => {
+  const toShareUrl = useCallback((publicUrl: string, isVideo = false) => {
     const match = publicUrl.match(/\/storage\/v1\/object\/public\/image-content\/(.+)$/);
-    if (match) return `https://groundstandard.netlify.app/img/${match[1]}`;
+    if (match) return `https://groundstandard.netlify.app/${isVideo ? 'raw-img' : 'img'}/${match[1]}`;
     return publicUrl;
   }, []);
 
@@ -1244,11 +1244,11 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   {/* Share URL */}
                   <div className="flex items-center gap-2 bg-gray-50 rounded-xl p-3 border border-gray-200">
                     <Link2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <input type="text" readOnly value={toShareUrl(selectedImage.public_url)} className="flex-1 bg-transparent text-xs text-gray-600 outline-none truncate" />
-                    <button type="button" onClick={() => copyUrl(toShareUrl(selectedImage.public_url))} className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Copy share link">
+                    <input type="text" readOnly value={toShareUrl(selectedImage.public_url, selectedImage.content_type === 'video')} className="flex-1 bg-transparent text-xs text-gray-600 outline-none truncate" />
+                    <button type="button" onClick={() => copyUrl(toShareUrl(selectedImage.public_url, selectedImage.content_type === 'video'))} className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Copy share link">
                       {copiedUrl ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5 text-gray-500" />}
                     </button>
-                    <a href={toShareUrl(selectedImage.public_url)} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Open in new tab">
+                    <a href={toShareUrl(selectedImage.public_url, selectedImage.content_type === 'video')} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-gray-200 rounded-lg transition flex-shrink-0" title="Open in new tab">
                       <ExternalLink className="w-3.5 h-3.5 text-gray-500" />
                     </a>
                   </div>
@@ -1377,8 +1377,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                           <button type="button"
                             onClick={async () => {
                               if (!videoComposeCaption.trim()) return;
-                              await supabase.from('image_content').update({ caption: videoComposeCaption.trim() }).eq('id', selectedImage.id);
-                              const updated = { ...selectedImage, caption: videoComposeCaption.trim() };
+                              await supabase.from('image_content').update({ caption: videoComposeCaption.trim(), status: 'completed' }).eq('id', selectedImage.id);
+                              const updated = { ...selectedImage, caption: videoComposeCaption.trim(), status: 'completed' };
                               setSelectedImage(updated);
                               setImages(prev => prev.map(i => i.id === selectedImage.id ? updated : i));
                               setVideoComposeSaved(true);
@@ -1584,8 +1584,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${dashboardView === 'review' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <LayoutList className="w-4 h-4" /> Review Queue
-                  {contentTab === 'images' && galleryFolderFilter !== 'unset' && (() => {
-                    const count = images.filter(i => i.content_type !== 'video' && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter))).length;
+                  {galleryFolderFilter !== 'unset' && (() => {
+                    const count = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter))).length;
                     return count > 0 ? (
                       <span className="ml-0.5 px-1.5 py-0.5 text-[9px] font-extrabold bg-orange-500 text-white rounded-full">
                         {count}
@@ -1599,8 +1599,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${dashboardView === 'schedule' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <Calendar className="w-4 h-4" /> Schedule
-                  {contentTab === 'images' && galleryFolderFilter !== 'unset' && (() => {
-                    const scheduledInFolder = images.filter(i => i.content_type !== 'video' && scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
+                  {galleryFolderFilter !== 'unset' && (() => {
+                    const scheduledInFolder = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
                     return scheduledInFolder.length > 0 ? (
                       <span className="ml-0.5 px-1.5 py-0.5 text-[9px] font-extrabold bg-green-500 text-white rounded-full">
                         {scheduledInFolder.length}
@@ -2015,14 +2015,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             )}
 
             {/* ── REVIEW QUEUE VIEW ── */}
-            {dashboardView === 'review' && contentTab === 'videos' && (
-              <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-12 text-center">
-                <Video className="w-12 h-12 text-violet-300 mx-auto mb-4" />
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Video Review Queue</h3>
-                <p className="text-sm text-gray-500">Coming soon — video review and approval will be available in a future update.</p>
-              </div>
-            )}
-            {dashboardView === 'review' && contentTab === 'images' && (
+            {dashboardView === 'review' && (
               galleryFolderFilter === 'unset' && !loading && images.length > 0 ? (
                 <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-8">
                   <div className="text-center mb-6">
@@ -2039,7 +2032,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                           className="flex flex-col items-center gap-2 p-5 rounded-2xl border-2 border-gray-200 bg-white hover:border-orange-400 hover:bg-orange-50 transition-all shadow-sm hover:shadow-md">
                           <Folder className="w-7 h-7 text-orange-400" />
                           <span className="text-sm font-bold text-gray-900 truncate max-w-full">{f.name}</span>
-                          <span className="text-xs text-gray-400">{images.filter(i => (i.content || i.caption) && i.folder_id === f.id).length} posts</span>
+                          <span className="text-xs text-gray-400">{images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && (i.content || i.caption) && i.folder_id === f.id).length} posts</span>
                         </button>
                       ))}
                     </div>
@@ -2069,7 +2062,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   </button>
                 </div>
                 {(() => {
-                  const allQueueImgs = images.filter(i => (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
+                  const allQueueImgs = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
                   const queueImgs = hideScheduled ? allQueueImgs.filter(i => !scheduledPosts[i.id]) : allQueueImgs;
                   const folderLabel = typeof galleryFolderFilter === 'number' ? folders.find(f => f.id === galleryFolderFilter)?.name || 'this folder' : 'Unfiled';
                   if (!allQueueImgs.length) return (
@@ -2338,16 +2331,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                     </div>
                   );
                 })()}
-                {loading ? (
-                  <div className="text-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400 mx-auto mb-2" /><p className="text-sm text-gray-500">Loading...</p></div>
-                ) : images.filter(i => i.content || i.caption).length === 0 ? (
-                  <div className="text-center py-16 bg-white rounded-3xl border border-gray-200">
-                    <LayoutList className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                    <p className="text-sm font-semibold text-gray-500">No generated content yet</p>
-                    <p className="text-xs text-gray-400 mt-1">Generate content for your images first, then review them here.</p>
-                    <button type="button" onClick={() => setDashboardView('gallery')} className="mt-4 px-4 py-2 text-xs font-bold text-orange-600 border border-orange-300 rounded-xl hover:bg-orange-50 transition">Go to Gallery</button>
-                  </div>
-                ) : reviewSelectedId !== null ? (() => {
+                {reviewSelectedId !== null ? (() => {
                   const img = images.find(i => i.id === reviewSelectedId);
                   if (!img) return null;
                   return (
@@ -2358,8 +2342,12 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                       </button>
                       <div className={`rounded-2xl border-2 bg-white shadow-sm overflow-hidden ${img.status === 'approved' ? 'border-green-300' : 'border-gray-200'}`}>
                         <div className="flex flex-col md:flex-row">
-                          <div className="md:w-56 flex-shrink-0 bg-gray-100 relative">
-                            <img src={thumbUrl(img.public_url, 400)} alt={img.file_name} loading="lazy" className="w-full h-56 md:h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                          <div className="md:w-56 flex-shrink-0 bg-black relative">
+                            {img.content_type === 'video' ? (
+                              <video src={img.public_url} controls className="w-full h-56 md:h-full object-contain" />
+                            ) : (
+                              <img src={thumbUrl(img.public_url, 400)} alt={img.file_name} loading="lazy" className="w-full h-56 md:h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                            )}
                             <div className="absolute top-2 left-2" onClick={e => e.stopPropagation()}>
                               <input type="checkbox" checked={selectedForExport.has(img.id)}
                                 onChange={() => setSelectedForExport(prev => { const next = new Set(prev); next.has(img.id) ? next.delete(img.id) : next.add(img.id); return next; })}
@@ -2440,7 +2428,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                     <p className="text-[11px] text-orange-600 font-semibold">Check the images you want to include in the CSV export, then click <span className="font-extrabold">Export CSV</span>.</p>
                   </div>
                   {(() => {
-                    const reviewFiltered = images.filter(i => (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
+                    const reviewFiltered = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && (i.content || i.caption) && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
                     const totalReviewPages = Math.max(1, Math.ceil(reviewFiltered.length / PAGE_SIZE));
                     const safeReviewPage = Math.min(reviewPage, totalReviewPages);
                     const pagedReview = reviewFiltered.slice((safeReviewPage - 1) * PAGE_SIZE, safeReviewPage * PAGE_SIZE);
@@ -2493,8 +2481,12 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                               </div>
                             </label>
                           </div>
-                          <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden flex-shrink-0">
-                            <img src={thumbUrl(img.public_url, 96)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                          <div className="w-12 h-12 rounded-xl bg-gray-100 overflow-hidden flex-shrink-0 relative">
+                            {img.content_type === 'video' ? (
+                              <><video src={img.public_url} className="w-full h-full object-cover" muted preload="metadata" /><div className="absolute inset-0 flex items-center justify-center bg-black/30"><Video className="w-4 h-4 text-white" /></div></>
+                            ) : (
+                              <img src={thumbUrl(img.public_url, 96)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-bold text-gray-900 truncate">{img.brand_profile_name || img.file_name}</p>
@@ -2527,9 +2519,13 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                       const isSelected = selectedForExport.has(img.id);
                       return (
                         <div key={img.id} className={`rounded-2xl border-2 bg-white shadow-sm overflow-hidden flex flex-col transition-all duration-200 ${isApproved ? 'border-green-300 shadow-green-100' : isSelected ? 'border-orange-300' : 'border-gray-200 hover:border-gray-300 hover:shadow-md'}`}>
-                          {/* Image */}
+                          {/* Image/Video */}
                           <div className="relative bg-gray-100 overflow-hidden">
-                            <img src={thumbUrl(img.public_url, 300)} alt={img.file_name} loading="lazy" className="w-full aspect-square object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                            {img.content_type === 'video' ? (
+                              <><video src={img.public_url} className="w-full aspect-square object-cover" muted preload="metadata" /><div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 text-white text-[9px] font-bold uppercase z-10"><Video className="w-3 h-3" />Video</div></>
+                            ) : (
+                              <img src={thumbUrl(img.public_url, 300)} alt={img.file_name} loading="lazy" className="w-full aspect-square object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                            )}
 
                             {/* Dark gradient overlay at bottom */}
                             <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/50 to-transparent" />
@@ -2617,14 +2613,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
             )}
 
             {/* ── SCHEDULE VIEW ── */}
-            {dashboardView === 'schedule' && contentTab === 'videos' && (
-              <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-12 text-center">
-                <Video className="w-12 h-12 text-violet-300 mx-auto mb-4" />
-                <h3 className="text-lg font-bold text-gray-900 mb-2">Video Scheduling</h3>
-                <p className="text-sm text-gray-500">Coming soon — video scheduling will be available in a future update.</p>
-              </div>
-            )}
-            {dashboardView === 'schedule' && contentTab === 'images' && (
+            {dashboardView === 'schedule' && (
               galleryFolderFilter === 'unset' && !loading && images.length > 0 ? (
                 <div className="rounded-3xl border border-gray-200/60 bg-white/70 backdrop-blur-sm shadow-sm overflow-hidden p-8">
                   <div className="text-center mb-6">
@@ -2671,7 +2660,7 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   </button>
                 </div>
                 {(() => {
-                  const allScheduledImgs = images.filter(i => scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
+                  const allScheduledImgs = images.filter(i => (contentTab === 'videos' ? i.content_type === 'video' : i.content_type !== 'video') && scheduledPosts[i.id] && (galleryFolderFilter === 'all' || (galleryFolderFilter === 'unset' || galleryFolderFilter === null ? !i.folder_id : i.folder_id === galleryFolderFilter)));
                   const scheduledImgs = scheduleFilter === 'approved'
                     ? allScheduledImgs.filter(i => i.status === 'approved')
                     : scheduleFilter === 'not_approved'
@@ -2790,7 +2779,11 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             return (
                               <div key={img.id} className={`bg-white rounded-2xl border-2 shadow-sm overflow-hidden hover:shadow-md transition-shadow ${isOverdue ? 'border-red-300' : 'border-gray-200'}`}>
                                 <div className="aspect-video bg-gray-100 overflow-hidden relative">
-                                  <img src={thumbUrl(img.public_url, 400)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                  {img.content_type === 'video' ? (
+                                    <><video src={img.public_url} className="w-full h-full object-cover" muted preload="metadata" /><div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 text-white text-[9px] font-bold uppercase z-10"><Video className="w-3 h-3" />Video</div></>
+                                  ) : (
+                                    <img src={thumbUrl(img.public_url, 400)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                  )}
                                   <div className="absolute top-2 right-2">
                                     {img.status === 'approved'
                                       ? <span className="px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider bg-green-500 text-white rounded-full shadow">Approved</span>
@@ -2851,8 +2844,12 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                             return (
                               <div key={img.id} className={`flex items-center gap-4 px-4 py-3 hover:bg-gray-50 transition ${isOverdue ? 'bg-red-50/40' : ''}`}>
                                 {/* Thumbnail */}
-                                <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
-                                  <img src={thumbUrl(img.public_url, 100)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                <div className="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0 relative">
+                                  {img.content_type === 'video' ? (
+                                    <><video src={img.public_url} className="w-full h-full object-cover" muted preload="metadata" /><div className="absolute inset-0 flex items-center justify-center bg-black/30"><Video className="w-4 h-4 text-white" /></div></>
+                                  ) : (
+                                    <img src={thumbUrl(img.public_url, 100)} alt={img.file_name} loading="lazy" className="w-full h-full object-cover" onError={e => { e.currentTarget.src = img.public_url; }} />
+                                  )}
                                 </div>
                                 {/* Name */}
                                 <div className="flex-1 min-w-0">
@@ -3287,8 +3284,8 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
                   <button type="button"
                     onClick={async () => {
                       if (!videoEditCaption.trim() || !selectedImage) return;
-                      await supabase.from('image_content').update({ caption: videoEditCaption.trim() }).eq('id', selectedImage.id);
-                      const updated = { ...selectedImage, caption: videoEditCaption.trim() };
+                      await supabase.from('image_content').update({ caption: videoEditCaption.trim(), status: 'completed' }).eq('id', selectedImage.id);
+                      const updated = { ...selectedImage, caption: videoEditCaption.trim(), status: 'completed' };
                       setSelectedImage(updated);
                       setImages(prev => prev.map(i => i.id === selectedImage.id ? updated : i));
                       setVideoCaptionSaved(true);
@@ -3389,14 +3386,22 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
               </div>
             </div>
 
-            {/* Hero Image */}
+            {/* Hero Image/Video */}
             <figure className="mb-10 -mx-6 sm:-mx-12">
               <div className="overflow-hidden rounded-xl sm:rounded-2xl shadow-sm">
-                <img
-                  src={selectedImage.public_url}
-                  alt={selectedImage.file_name}
-                  className="w-full h-auto"
-                />
+                {selectedImage.content_type === 'video' ? (
+                  <video
+                    src={selectedImage.public_url}
+                    controls
+                    className="w-full max-h-[400px] object-contain bg-black"
+                  />
+                ) : (
+                  <img
+                    src={selectedImage.public_url}
+                    alt={selectedImage.file_name}
+                    className="w-full h-auto"
+                  />
+                )}
               </div>
               <figcaption className="mt-3 text-center text-xs text-gray-400">
                 {selectedImage.file_name}
@@ -3468,12 +3473,16 @@ export default function ImageContentEditor({ onBackToLaunch }: ImageContentEdito
 
             {/* Image source */}
             <div className="mt-8 p-4 bg-gray-50 rounded-xl border border-gray-100 flex items-center gap-3">
-              <img src={selectedImage.public_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+              {selectedImage.content_type === 'video' ? (
+                <div className="w-12 h-12 rounded-lg bg-gray-200 flex items-center justify-center flex-shrink-0"><Video className="w-5 h-5 text-gray-500" /></div>
+              ) : (
+                <img src={selectedImage.public_url} alt="" className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
+              )}
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold text-gray-700 truncate">{selectedImage.file_name}</p>
-                <p className="text-[10px] text-gray-400 truncate">{selectedImage.public_url}</p>
+                <p className="text-[10px] text-gray-400 truncate">{toShareUrl(selectedImage.public_url, selectedImage.content_type === 'video')}</p>
               </div>
-              <button type="button" onClick={() => copyUrl(selectedImage.public_url)} className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 rounded-lg border border-gray-200 transition flex-shrink-0">
+              <button type="button" onClick={() => copyUrl(toShareUrl(selectedImage.public_url, selectedImage.content_type === 'video'))} className="px-3 py-1.5 text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 rounded-lg border border-gray-200 transition flex-shrink-0">
                 {copiedUrl ? 'Copied!' : 'Copy URL'}
               </button>
             </div>
